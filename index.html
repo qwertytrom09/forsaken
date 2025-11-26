@@ -113,7 +113,83 @@ html, body {margin:0; height:100%; overflow:hidden; background:#0e0f12; color:wh
 #settingsMenu .button-group {
   margin-top:20px; display:flex; justify-content:flex-end;
 }
+
+/* Player List */
+#playerList {
+  position: absolute;
+  top: 80px;
+  left: 20px;
+  background: rgba(13, 16, 24, 0.9);
+  border: 1px solid rgba(119, 192, 255, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 200px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 25;
+  font-size: 12px;
+}
+#playerList h3 {
+  margin: 0 0 8px 0;
+  color: #77c0ff;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(119, 192, 255, 0.2);
+  padding-bottom: 6px;
+}
+.player-item {
+  padding: 6px 8px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  color: #aaa;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.player-item.you {
+  background: rgba(119, 192, 255, 0.2);
+  color: #77c0ff;
+  font-weight: bold;
+}
+.player-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  flex-shrink: 0;
+}
 </style>
+
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+  import { getDatabase, ref, set, onValue, onDisconnect, remove, update } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-database.js";
+
+  // Your web app's Firebase configuration
+  const firebaseConfig = {
+    apiKey: "AIzaSyCYqXADT96Ag6sxR82-5dBl1_3GaZRt_68",
+    authDomain: "fors-7ee2c.firebaseapp.com",
+    databaseURL: "https://fors-7ee2c-default-rtdb.firebaseio.com",
+    projectId: "fors-7ee2c",
+    storageBucket: "fors-7ee2c.firebasestorage.app",
+    messagingSenderId: "980730651454",
+    appId: "1:980730651454:web:97dce0fd4b5959eaaa826f",
+    measurementId: "G-KWKKQ473PP"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const database = getDatabase(app);
+  
+  // Export for use in main script
+  window.firebaseDB = database;
+  window.firebaseRef = ref;
+  window.firebaseSet = set;
+  window.firebaseOnValue = onValue;
+  window.firebaseOnDisconnect = onDisconnect;
+  window.firebaseRemove = remove;
+  window.firebaseUpdate = update;
+</script>
 
 <script type="importmap">
 {
@@ -137,6 +213,12 @@ html, body {margin:0; height:100%; overflow:hidden; background:#0e0f12; color:wh
 <div id="sprintBtn">Sprint</div>
 
 <div id="touch-hint">Left: move • Right: look</div>
+
+<!-- Player List -->
+<div id="playerList">
+  <h3>Players Online</h3>
+  <div id="playerListContent"></div>
+</div>
 
 <!-- Settings menu -->
 <div id="settingsOverlay">
@@ -274,6 +356,12 @@ const wallMat = new THREE.MeshStandardMaterial({color:0x454a52});
 const wall1 = new THREE.Mesh(wallGeom, wallMat); wall1.position.set(30, 2, -30); scene.add(wall1);
 const wall2 = new THREE.Mesh(wallGeom, wallMat); wall2.position.set(-30, 2, 30); wall2.rotation.y=Math.PI/2; scene.add(wall2);
 
+// ---------- Multiplayer Setup ----------
+const myPlayerId = 'player_' + Math.random().toString(36).substr(2, 9);
+const otherPlayers = new Map(); // Store other players' meshes and data
+let lastUpdateTime = 0;
+const UPDATE_INTERVAL = 50; // Update every 50ms (20 times per second)
+
 // ---------- Player ----------
 let model, mixer, idleAction, walkAction, runAction;
 const loader = new GLTFLoader();
@@ -321,6 +409,213 @@ function loadPlayer(){
   });
 }
 loadPlayer();
+
+// ---------- Multiplayer Functions ----------
+function initMultiplayer() {
+  const db = window.firebaseDB;
+  const ref = window.firebaseRef;
+  const set = window.firebaseSet;
+  const onValue = window.firebaseOnValue;
+  const onDisconnect = window.firebaseOnDisconnect;
+  const remove = window.firebaseRemove;
+  const update = window.firebaseUpdate;
+
+  if (!db) {
+    console.error("Firebase not initialized");
+    return;
+  }
+
+  const playersRef = ref(db, 'players');
+  const myPlayerRef = ref(db, `players/${myPlayerId}`);
+
+  // Set up disconnect handler
+  onDisconnect(myPlayerRef).remove();
+
+  // Initialize my player data
+  set(myPlayerRef, {
+    id: myPlayerId,
+    x: playerState.pos.x,
+    y: playerState.pos.y,
+    z: playerState.pos.z,
+    rotation: playerState.rot,
+    moving: false,
+    timestamp: Date.now()
+  });
+
+  // Listen for other players
+  onValue(playersRef, (snapshot) => {
+    const players = snapshot.val() || {};
+    
+    // Update player list UI
+    updatePlayerListUI(players);
+
+    // Remove disconnected players
+    otherPlayers.forEach((playerData, playerId) => {
+      if (!players[playerId] || playerId === myPlayerId) {
+        scene.remove(playerData.mesh);
+        if (playerData.nameLabel) scene.remove(playerData.nameLabel);
+        otherPlayers.delete(playerId);
+      }
+    });
+
+    // Add or update other players
+    Object.keys(players).forEach(playerId => {
+      if (playerId !== myPlayerId) {
+        const playerData = players[playerId];
+        updateOtherPlayer(playerId, playerData);
+      }
+    });
+  });
+
+  // Update my position regularly
+  setInterval(() => {
+    if (model) {
+      update(myPlayerRef, {
+        x: playerState.pos.x,
+        y: playerState.pos.y,
+        z: playerState.pos.z,
+        rotation: playerState.rot,
+        moving: playerState.moving,
+        timestamp: Date.now()
+      });
+    }
+  }, UPDATE_INTERVAL);
+}
+
+function updateOtherPlayer(playerId, data) {
+  if (!otherPlayers.has(playerId)) {
+    // Create name label
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = 256;
+    canvas.height = 64;
+    context.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.font = 'bold 24px Arial';
+    context.fillStyle = '#77c0ff';
+    context.textAlign = 'center';
+    context.fillText(playerId.substring(7, 12), 128, 40);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+    const nameLabel = new THREE.Sprite(spriteMaterial);
+    nameLabel.scale.set(2, 0.5, 1);
+    scene.add(nameLabel);
+
+    // Store placeholder data
+    const playerData = {
+      mesh: null,
+      model: null,
+      mixer: null,
+      idleAction: null,
+      walkAction: null,
+      runAction: null,
+      currentAnim: 'idle',
+      nameLabel,
+      targetPos: new THREE.Vector3(data.x, data.y, data.z),
+      targetRot: data.rotation,
+      moving: data.moving || false
+    };
+    
+    otherPlayers.set(playerId, playerData);
+
+    // Load player model
+    const playerLoader = new GLTFLoader();
+    playerLoader.load("./model/idle.glb", idleGLB => {
+      const playerModel = idleGLB.scene;
+      playerModel.scale.set(0.35, 0.35, 0.35);
+      playerModel.rotation.y = data.rotation;
+      playerModel.position.set(data.x, data.y, data.z);
+      
+      // Generate unique color for this player
+      const hue = (playerId.charCodeAt(0) * 137.508) % 360;
+      playerModel.traverse((child) => {
+        if (child.isMesh) {
+          child.material = child.material.clone();
+          child.material.color.setHSL(hue / 360, 0.6, 0.5);
+        }
+      });
+      
+      scene.add(playerModel);
+      
+      const playerMixer = new THREE.AnimationMixer(playerModel);
+      const idleAction = playerMixer.clipAction(idleGLB.animations[0]);
+      idleAction.play();
+
+      playerData.model = playerModel;
+      playerData.mesh = playerModel;
+      playerData.mixer = playerMixer;
+      playerData.idleAction = idleAction;
+
+      // Load walk animation
+      playerLoader.load("./model/walk.glb", walkGLB => {
+        const walkAction = playerMixer.clipAction(walkGLB.animations[0]);
+        walkAction.timeScale = 2;
+        playerData.walkAction = walkAction;
+
+        // Load run animation
+        playerLoader.load("./model/run.glb", runGLB => {
+          const runAction = playerMixer.clipAction(runGLB.animations[0]);
+          runAction.timeScale = 3.3;
+          playerData.runAction = runAction;
+        }, undefined, err => {
+          playerData.runAction = walkAction;
+        });
+      }, undefined, err => {
+        playerData.walkAction = idleAction;
+        playerData.runAction = idleAction;
+      });
+    }, undefined, err => {
+      console.error("Failed to load model for player " + playerId);
+      // Fallback to capsule if model fails
+      const geometry = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
+      const hue = (playerId.charCodeAt(0) * 137.508) % 360;
+      const material = new THREE.MeshStandardMaterial({ 
+        color: new THREE.Color().setHSL(hue / 360, 0.7, 0.6) 
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(data.x, data.y, data.z);
+      scene.add(mesh);
+      playerData.mesh = mesh;
+      playerData.model = mesh;
+    });
+  }
+
+  // Update target position for smooth interpolation
+  const playerData = otherPlayers.get(playerId);
+  if (playerData) {
+    playerData.targetPos.set(data.x, data.y, data.z);
+    playerData.targetRot = data.rotation;
+    playerData.moving = data.moving || false;
+  }
+}
+
+function updatePlayerListUI(players) {
+  const listContent = document.getElementById('playerListContent');
+  const playerCount = Object.keys(players).length;
+  
+  let html = '';
+  Object.keys(players).forEach(playerId => {
+    const isMe = playerId === myPlayerId;
+    html += `
+      <div class="player-item ${isMe ? 'you' : ''}">
+        <div class="player-indicator"></div>
+        <span>${isMe ? 'You' : playerId.substring(7, 12)}</span>
+      </div>
+    `;
+  });
+  
+  listContent.innerHTML = html || '<div style="color:#666;padding:8px;">No players</div>';
+  document.querySelector('#playerList h3').textContent = `Players Online (${playerCount})`;
+}
+
+// Initialize multiplayer after a short delay to ensure Firebase is loaded
+setTimeout(() => {
+  if (window.firebaseDB) {
+    initMultiplayer();
+    console.log('Multiplayer initialized. Your ID:', myPlayerId);
+  }
+}, 1000);
 
 // ---------- Camera ----------
 let camYaw=0, camPitch=-0.35, camDist=6, camHeight=3;
@@ -616,6 +911,44 @@ function animate(){
     camera.position.set(camX,camY,camZ);
     camera.lookAt(playerState.pos.x,playerState.pos.y+2,playerState.pos.z);
   }
+
+  // Update other players (smooth interpolation)
+  otherPlayers.forEach((playerData) => {
+    if (!playerData.mesh) return;
+    
+    // Update animations
+    if (playerData.mixer) {
+      playerData.mixer.update(dt);
+      
+      // Switch animations based on moving state
+      if (playerData.moving && playerData.currentAnim === 'idle') {
+        if (playerData.idleAction && playerData.walkAction) {
+          playerData.idleAction.fadeOut(0.2);
+          playerData.walkAction.reset().fadeIn(0.2).play();
+          playerData.currentAnim = 'walk';
+        }
+      } else if (!playerData.moving && playerData.currentAnim !== 'idle') {
+        if (playerData.idleAction && playerData.walkAction) {
+          playerData.walkAction.fadeOut(0.2);
+          playerData.idleAction.reset().fadeIn(0.2).play();
+          playerData.currentAnim = 'idle';
+        }
+      }
+    }
+    
+    // Smooth position interpolation
+    playerData.mesh.position.lerp(playerData.targetPos, 0.2);
+    
+    // Smooth rotation interpolation
+    let rotDiff = normalizeAngle(playerData.targetRot - playerData.mesh.rotation.y);
+    playerData.mesh.rotation.y += rotDiff * 0.2;
+    
+    // Update name label position
+    if (playerData.nameLabel) {
+      playerData.nameLabel.position.copy(playerData.mesh.position);
+      playerData.nameLabel.position.y += 2.5;
+    }
+  });
 
   renderer.render(scene,camera);
   hudState.gamepad=!!gamepad.active;
