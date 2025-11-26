@@ -297,7 +297,6 @@ function loadPlayer(){
       walkAction.timeScale=2;
       console.log('Walk animation loaded');
       
-      
       // Load run animation
       loader.load("./model/run.glb", runGLB=>{
         runAction=mixer.clipAction(runGLB.animations[0]);
@@ -486,9 +485,10 @@ function normalizeAngle(a){ return Math.atan2(Math.sin(a), Math.cos(a)); }
 function setAnim(target){
   if(!idleAction||!walkAction||currentAnim===target) return;
   const outgoing = currentAnim==='idle' ? idleAction : currentAnim==='walk' ? walkAction : runAction;
+  
   if(target==="run" && runAction){ 
     outgoing.fadeOut(0.2); 
-    runAction.reset().fadeIn(0.1).play(); 
+    runAction.reset().fadeIn(0.2).play(); 
     currentAnim='run';
   }
   else if(target==="walk"){ 
