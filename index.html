@@ -502,7 +502,7 @@ function setAnim(target){
 
   if(target==="run" && runAction){
     outgoing.fadeOut(0.2);
-    runAction.reset().fadeIn(0.2).play();
+    runAction.reset().fadeIn(0.1).play();
     currentAnim="run";
   }
   else if(target==="walk"){
@@ -541,13 +541,28 @@ function animate(){
       ) &&
       (Math.abs(forward)>0 || Math.abs(sideways)>0);
 
-    if(leftJoy.active){
-      forward=-leftJoy.y/leftJoy.max;
-      sideways=leftJoy.x/leftJoy.max;
-      if(Math.abs(forward)<0.05) forward=0;
-      if(Math.abs(sideways)<0.05) sideways=0;
+    // ---------- FIXED JOYSTICK SPRINT LOGIC ----------
+    if (leftJoy.active) {
+      // raw joystick input
+      let rawForward = -leftJoy.y / leftJoy.max;
+      let rawSideways = leftJoy.x / leftJoy.max;
+
+      // detect joystick movement BEFORE deadzone
+      const joyMoving = Math.abs(rawForward) > 0.01 || Math.abs(rawSideways) > 0.01;
+
+      // apply deadzone AFTER sprint detection
+      forward = Math.abs(rawForward) < 0.05 ? 0 : rawForward;
+      sideways = Math.abs(rawSideways) < 0.05 ? 0 : rawSideways;
+
+      // sprint only if joystick actually moves
+      if (joyMoving) {
+        isSprinting =
+          (keys.ShiftLeft || keys.ShiftRight || sprintTouch.active) &&
+          joyMoving;
+      }
     }
 
+    // Gamepad
     if(gamepad.active){
       const [lx,ly,rx,ry] = [...gamepad.active.axes];
       const dz=settings.gamepadDeadzone;
