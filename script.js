@@ -325,21 +325,26 @@ function createPlayerNameLabel(playerId, playerData) {
   playerData.nameLabel = nameLabel;
 }
 
-function updatePlayerListUI(players) {
+function updatePlayerListUI() {
   const listContent = document.getElementById('playerListContent');
-  const playerCount = Object.keys(players).length;
-  
-  let html = '';
-  Object.keys(players).forEach(playerId => {
-    const isMe = playerId === myPlayerId;
+  const playerCount = otherPlayers.size + 1; // +1 for self
+
+  let html = `
+    <div class="player-item you">
+      <div class="player-indicator"></div>
+      <span>You</span>
+    </div>
+  `;
+
+  otherPlayers.forEach((playerData, playerId) => {
     html += `
-      <div class="player-item ${isMe ? 'you' : ''}">
+      <div class="player-item">
         <div class="player-indicator"></div>
-        <span>${isMe ? 'You' : playerId.substring(7, 12)}</span>
+        <span>${playerId.substring(7, 12)}</span>
       </div>
     `;
   });
-  
+
   listContent.innerHTML = html || '<div style="color:#666;padding:8px;">No players</div>';
   document.querySelector('#playerList h3').textContent = `Players Online (${playerCount})`;
 }
@@ -349,6 +354,7 @@ setTimeout(() => initMultiplayer(), 1500);
 // ---------- Chat System ----------
 const MAX_CHAT_MESSAGES = 50;
 const chatMessages = [];
+const db = window.firebaseDB; // Firebase database reference for chat
 
 function addChatMessage(username, message) {
   const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -359,7 +365,7 @@ function addChatMessage(username, message) {
 
 function updateChatUI() {
   const chatDiv = document.getElementById('chatMessages');
-  chatDiv.innerHTML = chatMessages.map(msg => 
+  chatDiv.innerHTML = chatMessages.map(msg =>
     `<div class="chat-msg"><strong>${msg.username}:</strong> ${msg.message}</div>`
   ).join('');
   chatDiv.scrollTop = chatDiv.scrollHeight;
@@ -369,21 +375,21 @@ function sendChatMessage() {
   const input = document.getElementById('chatField');
   const message = input.value.trim();
   if (!message || !multiplayerReady) return;
-  
+
   const ref = window.firebaseRef;
   const push = window.firebasePush;
   if (!push) {
     console.error("Firebase push not available");
     return;
   }
-  
+
   const chatRef = ref(db, 'chat');
   push(chatRef, {
     username: myPlayerId.substring(7, 12),
     message: message,
     timestamp: Date.now()
   }).catch(err => console.error("Chat error:", err));
-  
+
   input.value = '';
 }
 
@@ -392,7 +398,7 @@ function initChatListeners() {
   const ref = window.firebaseRef;
   const onValue = window.firebaseOnValue;
   const chatRef = ref(db, 'chat');
-  
+
   onValue(chatRef, (snapshot) => {
     const messages = snapshot.val() || {};
     Object.keys(messages).forEach(key => {
