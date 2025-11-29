@@ -1,0 +1,247 @@
+html, body {margin:0; height:100%; overflow:hidden; background:#0e0f12; color:white; -webkit-user-select:none; user-select:none; touch-action:none;}
+#scene {width:100%; height:100%; display:block; touch-action:none;}
+#loading {position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#77c0ff; font-size:20px;}
+#hud {position:absolute; top:20px; left:20px; color:#77c0ff; font-size:14px; background:rgba(0,0,0,0.4); padding:6px 10px; border-radius:6px; z-index:30;}
+#shiftLockIndicator {position:absolute; top:20px; right:120px; z-index:31; background:rgba(13,16,24,0.85); border:1px solid rgba(119,192,255,0.3); color:#9fd0ff; padding:7px 14px; border-radius:999px; font-size:12px; letter-spacing:0.3px; box-shadow:0 6px 20px rgba(0,0,0,0.4); transition:background 0.3s ease, border-color 0.3s ease, color 0.3s ease, transform 0.2s ease;}
+#shiftLockIndicator.active {background:rgba(119,192,255,0.2); border-color:rgba(119,192,255,0.8); color:#fff; transform:translateY(-1px);}
+
+/* Left joystick */
+#leftJoy {
+  position:absolute; left:40px; bottom:40px;
+  width:120px; height:120px;
+  border-radius:50%; background: rgba(255,255,255,0.12); border:2px solid rgba(255,255,255,0.25);
+  touch-action:none; z-index:20;
+}
+#leftJoy .stick {
+  position:absolute; width:50px; height:50px; border-radius:50%; background: rgba(255,255,255,0.35);
+  left:35px; top:35px;
+  touch-action:none;
+}
+#touch-hint {
+  position:absolute; left:50%; bottom:18px; transform:translateX(-50%);
+  color:rgba(119,192,255,0.9); font-size:12px;
+  background: rgba(0,0,0,0.35); padding:6px 10px; border-radius:8px; z-index:20;
+}
+
+/* Sprint Button (Mobile) */
+#sprintBtn {
+  position: absolute;
+  right: 40px;
+  bottom: 40px;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+  border: 2px solid rgba(255,255,255,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #77c0ff;
+  z-index: 25;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.15s, transform 0.1s;
+}
+#sprintBtn.active {
+  background: rgba(119,192,255,0.28);
+  transform: scale(1.08);
+}
+
+/* Settings menu */
+#settingsBtn {
+  position:absolute; top:20px; right:20px; z-index:31;
+  background:rgba(119,192,255,0.2); border:1px solid rgba(119,192,255,0.5);
+  color:#77c0ff; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:12px;
+  transition:transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow:0 8px 18px rgba(119,192,255,0.25);
+}
+#settingsBtn:hover { background:rgba(119,192,255,0.4); border-color:rgba(119,192,255,0.8); transform:translateY(-1px) scale(1.02); box-shadow:0 12px 28px rgba(119,192,255,0.35); }
+
+#settingsOverlay {
+  position:fixed; top:0; left:0; right:0; bottom:0;
+  background:rgba(0,0,0,0.7); z-index:100; backdrop-filter:blur(6px);
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; visibility:hidden; pointer-events:none;
+  transition:opacity 0.35s ease, visibility 0s linear 0.35s;
+}
+#settingsOverlay.visible {
+  opacity:1; visibility:visible; pointer-events:auto;
+  transition:opacity 0.35s ease;
+}
+#settingsMenu {
+  position:relative;
+  background:rgba(20,22,28,0.95); border:2px solid rgba(119,192,255,0.3);
+  padding:30px; border-radius:12px; max-width:400px; width:90%;
+  box-shadow:0 8px 32px rgba(0,0,0,0.5);
+  transform:translateY(20px) scale(0.96);
+  opacity:0;
+  transition:transform 0.4s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease;
+}
+#settingsOverlay.visible #settingsMenu { transform:translateY(0) scale(1); opacity:1; }
+#settingsMenu h2 {
+  margin:0 0 20px 0; color:#77c0ff; font-size:18px;
+}
+.setting-row {
+  margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;
+}
+.setting-row label { color:#aaa; font-size:12px; }
+.setting-row input[type="range"] {
+  width:60%; cursor:pointer;
+}
+.setting-row input[type="checkbox"] {
+  cursor:pointer; width:18px; height:18px;
+}
+.setting-row select {
+  background:rgba(255,255,255,0.08); border:1px solid rgba(119,192,255,0.3);
+  color:#77c0ff; padding:6px 8px; border-radius:4px; cursor:pointer; font-size:12px;
+}
+#settingsMenu button {
+  background:rgba(119,192,255,0.2); border:1px solid rgba(119,192,255,0.5);
+  color:#77c0ff; padding:8px 12px; border-radius:6px; cursor:pointer; margin-right:8px;
+  transition:all 0.2s; font-size:12px;
+}
+#settingsMenu button:hover { background:rgba(119,192,255,0.4); }
+#settingsMenu .button-group {
+  margin-top:20px; display:flex; justify-content:flex-end;
+}
+
+/* Player List */
+#playerList {
+  position: absolute;
+  top: 80px;
+  left: 20px;
+  background: rgba(13, 16, 24, 0.9);
+  border: 1px solid rgba(119, 192, 255, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 200px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 25;
+  font-size: 12px;
+}
+#playerList h3 {
+  margin: 0 0 8px 0;
+  color: #77c0ff;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(119, 192, 255, 0.2);
+  padding-bottom: 6px;
+}
+.player-item {
+  padding: 6px 8px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  color: #aaa;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.player-item.you {
+  background: rgba(119, 192, 255, 0.2);
+  color: #77c0ff;
+  font-weight: bold;
+}
+.player-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  flex-shrink: 0;
+}
+
+/* Chat Box */
+#chatBox {
+  position: absolute;
+  bottom: 40px;
+  left: 20px;
+  background: rgba(13, 16, 24, 0.95);
+  border: 1px solid rgba(119, 192, 255, 0.3);
+  border-radius: 8px;
+  width: 300px;
+  max-height: 350px;
+  display: flex;
+  flex-direction: column;
+  z-index: 24;
+  font-size: 12px;
+}
+#chatBox h3 {
+  margin: 0;
+  padding: 10px;
+  color: #77c0ff;
+  border-bottom: 1px solid rgba(119, 192, 255, 0.2);
+  font-size: 14px;
+}
+#chatMessages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  max-height: 260px;
+}
+.chat-msg {
+  padding: 6px 4px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  color: #aaa;
+  word-wrap: break-word;
+}
+.chat-msg strong {
+  color: #77c0ff;
+}
+#chatInput {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid rgba(119, 192, 255, 0.2);
+}
+#chatField {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(119, 192, 255, 0.3);
+  color: #fff;
+  padding: 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+#chatField::placeholder { color: rgba(255, 255, 255, 0.4); }
+#chatSend {
+  background: rgba(119, 192, 255, 0.2);
+  border: 1px solid rgba(119, 192, 255, 0.5);
+  color: #77c0ff;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s;
+}
+#chatSend:hover { background: rgba(119, 192, 255, 0.4); }
+
+/* Emotes Panel */
+#emotesPanel {
+  position: absolute;
+  bottom: 350px;
+  left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 24;
+}
+.emote-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 8px;
+  background: rgba(119, 192, 255, 0.15);
+  border: 1px solid rgba(119, 192, 255, 0.3);
+  font-size: 24px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.emote-btn:hover {
+  background: rgba(119, 192, 255, 0.3);
+  transform: scale(1.08);
+}
