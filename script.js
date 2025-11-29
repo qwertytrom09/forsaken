@@ -111,7 +111,7 @@ let myPlayerRef = null;
 const db = window.firebaseDB;
 
 // ---------- Player ----------
-let model, mixer, idleAction, walkAction, runAction, idleSpecialAction;
+let model, mixer, idleAction, walkAction, runAction, idleSpecialAction, emoteWaveAction, emoteLaughAction;
 const loader = new GLTFLoader();
 const playerState = { pos:new THREE.Vector3(0,0,0), rot:0, moving:false };
 let currentAnim = 'idle';
@@ -140,13 +140,78 @@ function loadPlayer(){
           idleSpecialAction=mixer.clipAction(idleSpecialGLB.animations[0]);
           idleSpecialAction.loop=THREE.LoopOnce;
           idleSpecialAction.clampWhenFinished=true;
-          document.getElementById("loading").style.display="none";
-          initMultiplayer(); // Initialize after models load
+
+          // Load emote animations (same pattern as idle_special1)
+          loader.load("./model/emote_wave.glb", emoteWaveGLB=>{
+            emoteWaveAction=mixer.clipAction(emoteWaveGLB.animations[0]);
+            emoteWaveAction.loop=THREE.LoopOnce;
+            emoteWaveAction.clampWhenFinished=true;
+
+            loader.load("./model/emote_laugh.glb", emoteLaughGLB=>{
+              emoteLaughAction=mixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop=THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished=true;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer(); // Initialize after models load
+            }, undefined, err=>{
+              console.log("Laugh emote animation missing, using regular idle.");
+              emoteLaughAction=null;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer();
+            });
+          }, undefined, err=>{
+            console.log("Wave emote animation missing, using regular idle.");
+            emoteWaveAction=null;
+            loader.load("./model/emote_laugh.glb", emoteLaughGLB=>{
+              emoteLaughAction=mixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop=THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished=true;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer();
+            }, undefined, err=>{
+              console.log("Laugh emote animation missing, using regular idle.");
+              emoteLaughAction=null;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer();
+            });
+          });
         }, undefined, err=>{
           console.log("Idle special animation missing, using regular idle.");
           idleSpecialAction=null;
-          document.getElementById("loading").style.display="none";
-          initMultiplayer();
+          // Load emote animations even if idle special is missing
+          loader.load("./model/emote_wave.glb", emoteWaveGLB=>{
+            emoteWaveAction=mixer.clipAction(emoteWaveGLB.animations[0]);
+            emoteWaveAction.loop=THREE.LoopOnce;
+            emoteWaveAction.clampWhenFinished=true;
+
+            loader.load("./model/emote_laugh.glb", emoteLaughGLB=>{
+              emoteLaughAction=mixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop=THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished=true;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer();
+            }, undefined, err=>{
+              console.log("Laugh emote animation missing.");
+              emoteLaughAction=null;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer();
+            });
+          }, undefined, err=>{
+            console.log("Wave emote animation missing.");
+            emoteWaveAction=null;
+            loader.load("./model/emote_laugh.glb", emoteLaughGLB=>{
+              emoteLaughAction=mixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop=THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished=true;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer();
+            }, undefined, err=>{
+              console.log("Laugh emote animation missing.");
+              emoteLaughAction=null;
+              document.getElementById("loading").style.display="none";
+              initMultiplayer();
+            });
+          });
         });
 
       }, undefined, err=>{
@@ -204,6 +269,7 @@ function initMultiplayer() {
     z: playerState.pos.z,
     rotation: playerState.rot,
     moving: false,
+    animation: currentAnim,
     timestamp: Date.now(),
     health: 100,
     stamina: 100
@@ -240,6 +306,7 @@ function initMultiplayer() {
         z: playerState.pos.z,
         rotation: playerState.rot,
         moving: playerState.moving,
+        animation: currentAnim,
         timestamp: Date.now()
       }).catch(err => console.error("Update error:", err));
     }
@@ -255,7 +322,11 @@ function updateOtherPlayer(playerId, data) {
       idleAction: null,
       walkAction: null,
       runAction: null,
+      idleSpecialAction: null,
+      emoteWaveAction: null,
+      emoteLaughAction: null,
       currentAnim: 'idle',
+      animation: data.animation || 'idle',
       nameLabel: null,
       targetPos: new THREE.Vector3(data.x || 0, data.y || 0, data.z || 0),
       targetRot: data.rotation || 0,
@@ -271,6 +342,7 @@ function updateOtherPlayer(playerId, data) {
       playerData.targetPos.set(data.x || playerData.targetPos.x, data.y || playerData.targetPos.y, data.z || playerData.targetPos.z);
       playerData.targetRot = data.rotation !== undefined ? data.rotation : playerData.targetRot;
       playerData.moving = data.moving || false;
+      playerData.animation = data.animation || 'idle';
       playerData.health = data.health || 100;
     }
   }
@@ -314,12 +386,78 @@ function createOtherPlayerModel(playerId, playerData, data) {
         const runAction = playerMixer.clipAction(runGLB.animations[0]);
         runAction.timeScale = 3.3;
         playerData.runAction = runAction;
+
+        playerLoader.load("./model/idle_special1.glb", idleSpecialGLB => {
+          const idleSpecialAction = playerMixer.clipAction(idleSpecialGLB.animations[0]);
+          idleSpecialAction.loop = THREE.LoopOnce;
+          idleSpecialAction.clampWhenFinished = true;
+          playerData.idleSpecialAction = idleSpecialAction;
+
+          playerLoader.load("./model/emote_wave.glb", emoteWaveGLB => {
+            const emoteWaveAction = playerMixer.clipAction(emoteWaveGLB.animations[0]);
+            emoteWaveAction.loop = THREE.LoopOnce;
+            emoteWaveAction.clampWhenFinished = true;
+            playerData.emoteWaveAction = emoteWaveAction;
+
+            playerLoader.load("./model/emote_laugh.glb", emoteLaughGLB => {
+              const emoteLaughAction = playerMixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop = THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished = true;
+              playerData.emoteLaughAction = emoteLaughAction;
+            }, undefined, err => {
+              playerData.emoteLaughAction = null;
+            });
+          }, undefined, err => {
+            playerData.emoteWaveAction = null;
+            playerLoader.load("./model/emote_laugh.glb", emoteLaughGLB => {
+              const emoteLaughAction = playerMixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop = THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished = true;
+              playerData.emoteLaughAction = emoteLaughAction;
+            }, undefined, err => {
+              playerData.emoteLaughAction = null;
+            });
+          });
+        }, undefined, err => {
+          playerData.idleSpecialAction = null;
+          playerLoader.load("./model/emote_wave.glb", emoteWaveGLB => {
+            const emoteWaveAction = playerMixer.clipAction(emoteWaveGLB.animations[0]);
+            emoteWaveAction.loop = THREE.LoopOnce;
+            emoteWaveAction.clampWhenFinished = true;
+            playerData.emoteWaveAction = emoteWaveAction;
+
+            playerLoader.load("./model/emote_laugh.glb", emoteLaughGLB => {
+              const emoteLaughAction = playerMixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop = THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished = true;
+              playerData.emoteLaughAction = emoteLaughAction;
+            }, undefined, err => {
+              playerData.emoteLaughAction = null;
+            });
+          }, undefined, err => {
+            playerData.emoteWaveAction = null;
+            playerLoader.load("./model/emote_laugh.glb", emoteLaughGLB => {
+              const emoteLaughAction = playerMixer.clipAction(emoteLaughGLB.animations[0]);
+              emoteLaughAction.loop = THREE.LoopOnce;
+              emoteLaughAction.clampWhenFinished = true;
+              playerData.emoteLaughAction = emoteLaughAction;
+            }, undefined, err => {
+              playerData.emoteLaughAction = null;
+            });
+          });
+        });
       }, undefined, err => {
         playerData.runAction = walkAction;
+        playerData.idleSpecialAction = null;
+        playerData.emoteWaveAction = null;
+        playerData.emoteLaughAction = null;
       });
     }, undefined, err => {
       playerData.walkAction = idleAction;
       playerData.runAction = idleAction;
+      playerData.idleSpecialAction = null;
+      playerData.emoteWaveAction = null;
+      playerData.emoteLaughAction = null;
     });
   }, undefined, err => {
     const geometry = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
@@ -454,8 +592,13 @@ const emoteAnimations = {
 function playEmote(emoteName) {
   if (!multiplayerReady) return;
 
-  // Show emote in chat
-  addChatMessage('System', `${myPlayerId.substring(7, 12)} ${emoteAnimations[emoteName].sound}`);
+
+  // Play 3D animation if available
+  if (emoteName === 'wave' && emoteWaveAction) {
+    setAnim('emote_wave');
+  } else if (emoteName === 'laugh' && emoteLaughAction) {
+    setAnim('emote_laugh');
+  }
 }
 
 document.querySelectorAll('.emote-btn').forEach(btn => {
@@ -641,7 +784,7 @@ function normalizeAngle(a){ return Math.atan2(Math.sin(a),Math.cos(a)); }
 
 function setAnim(target){
   if(!idleAction||!walkAction||currentAnim===target) return;
-  const outgoing = currentAnim==='idle'?idleAction:currentAnim==='idleSpecial'?idleSpecialAction:currentAnim==='walk'?walkAction:runAction;
+  const outgoing = currentAnim==='idle'?idleAction:currentAnim==='idleSpecial'?idleSpecialAction:currentAnim==='walk'?walkAction:currentAnim==='run'?runAction:currentAnim==='emote_wave'?emoteWaveAction:currentAnim==='emote_laugh'?emoteLaughAction:idleAction;
 
   if(target==="run" && runAction){
     outgoing.fadeOut(0.2);
@@ -666,6 +809,52 @@ function setAnim(target){
     idleSpecialAction.reset().fadeIn(1).play();
     currentAnim="idleSpecial";
   }
+  else if(target==="emote_wave" && emoteWaveAction){
+    outgoing.fadeOut(0.1);
+    emoteWaveAction.reset().fadeIn(1).play();
+    currentAnim="emote_wave";
+  }
+  else if(target==="emote_laugh" && emoteLaughAction){
+    outgoing.fadeOut(0.1);
+    emoteLaughAction.reset().fadeIn(1).play();
+    currentAnim="emote_laugh";
+  }
+}
+
+function setOtherAnim(playerData, target){
+  if(!playerData.idleAction||!playerData.walkAction||playerData.currentAnim===target) return;
+  const outgoing = playerData.currentAnim==='idle'?playerData.idleAction:playerData.currentAnim==='idleSpecial'?playerData.idleSpecialAction:playerData.currentAnim==='walk'?playerData.walkAction:playerData.currentAnim==='run'?playerData.runAction:playerData.currentAnim==='emote_wave'?playerData.emoteWaveAction:playerData.currentAnim==='emote_laugh'?playerData.emoteLaughAction:playerData.idleAction;
+
+  if(target==="run" && playerData.runAction){
+    outgoing.fadeOut(0.2);
+    playerData.runAction.reset().fadeIn(0.05).play();
+    playerData.currentAnim="run";
+  }
+  else if(target==="walk"){
+    outgoing.fadeOut(0.2);
+    playerData.walkAction.reset().fadeIn(0.2).play();
+    playerData.currentAnim="walk";
+  }
+  else if(target==="idle"){
+    outgoing.fadeOut(0.2);
+    playerData.idleAction.reset().fadeIn(0.2).play();
+    playerData.currentAnim="idle";
+  }
+  else if(target==="idleSpecial" && playerData.idleSpecialAction){
+    outgoing.fadeOut(0.1);
+    playerData.idleSpecialAction.reset().fadeIn(1).play();
+    playerData.currentAnim="idleSpecial";
+  }
+  else if(target==="emote_wave" && playerData.emoteWaveAction){
+    outgoing.fadeOut(0.1);
+    playerData.emoteWaveAction.reset().fadeIn(1).play();
+    playerData.currentAnim="emote_wave";
+  }
+  else if(target==="emote_laugh" && playerData.emoteLaughAction){
+    outgoing.fadeOut(0.1);
+    playerData.emoteLaughAction.reset().fadeIn(1).play();
+    playerData.currentAnim="emote_laugh";
+  }
 }
 
 // ---------- Main Loop ----------
@@ -675,6 +864,12 @@ function animate(){
   if(mixer) mixer.update(dt);
 
   if(currentAnim==='idleSpecial' && idleSpecialAction && !idleSpecialAction.isRunning()){
+    setAnim("idle");
+  }
+  if(currentAnim==='emote_wave' && emoteWaveAction && !emoteWaveAction.isRunning()){
+    setAnim("idle");
+  }
+  if(currentAnim==='emote_laugh' && emoteLaughAction && !emoteLaughAction.isRunning()){
     setAnim("idle");
   }
 
@@ -766,7 +961,7 @@ function animate(){
         idleTimer=0;
         nextIdleSpecialTime=Math.random()*15+5;
       }
-      else if(currentAnim!=='idle' && currentAnim!=='idleSpecial'){
+      else if(currentAnim!=='idle' && currentAnim!=='idleSpecial' && !currentAnim.includes('emote')){
         setAnim("idle");
       }
       playerState.moving=false;
@@ -783,34 +978,35 @@ function animate(){
   // Update other players (smooth interpolation)
   otherPlayers.forEach((playerData) => {
     if (!playerData.mesh) return;
-    
+
     // Update animations
     if (playerData.mixer) {
       playerData.mixer.update(dt);
-      
-      // Switch animations based on moving state
-      if (playerData.moving && playerData.currentAnim === 'idle') {
-        if (playerData.idleAction && playerData.walkAction) {
-          playerData.idleAction.fadeOut(0.2);
-          playerData.walkAction.reset().fadeIn(0.2).play();
-          playerData.currentAnim = 'walk';
-        }
-      } else if (!playerData.moving && playerData.currentAnim !== 'idle') {
-        if (playerData.idleAction && playerData.walkAction) {
-          playerData.walkAction.fadeOut(0.2);
-          playerData.idleAction.reset().fadeIn(0.2).play();
-          playerData.currentAnim = 'idle';
-        }
+
+      // Switch animations based on synced animation state
+      if (playerData.animation !== playerData.currentAnim) {
+        setOtherAnim(playerData, playerData.animation);
+      }
+
+      // Reset finished one-shot animations to idle
+      if (playerData.currentAnim === 'idleSpecial' && playerData.idleSpecialAction && !playerData.idleSpecialAction.isRunning()) {
+        setOtherAnim(playerData, 'idle');
+      }
+      if (playerData.currentAnim === 'emote_wave' && playerData.emoteWaveAction && !playerData.emoteWaveAction.isRunning()) {
+        setOtherAnim(playerData, 'idle');
+      }
+      if (playerData.currentAnim === 'emote_laugh' && playerData.emoteLaughAction && !playerData.emoteLaughAction.isRunning()) {
+        setOtherAnim(playerData, 'idle');
       }
     }
-    
+
     // Smooth position interpolation
     playerData.mesh.position.lerp(playerData.targetPos, 0.2);
-    
+
     // Smooth rotation interpolation
     let rotDiff = normalizeAngle(playerData.targetRot - playerData.mesh.rotation.y);
     playerData.mesh.rotation.y += rotDiff * 0.2;
-    
+
     // Update name label position
     if (playerData.nameLabel) {
       playerData.nameLabel.position.copy(playerData.mesh.position);
