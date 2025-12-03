@@ -17,6 +17,8 @@ let playerHealth = 100;
 let playerStamina = 100;
 const maxHealth = 100;
 const maxStamina = 100;
+let staminaRecoveryTimer = 0; // Timer for recovery delay when stamina reaches 0
+let sprintBlockTimer = 0; // Timer that blocks sprinting after stamina depletion
 
 // ---------- Settings ----------
 const settings = {
@@ -198,7 +200,7 @@ function loadPlayer(){
 
       loader.load("./model/run.glb", runGLB=>{
         runAction=mixer.clipAction(runGLB.animations[0]);
-        runAction.timeScale=3.3;
+        runAction.timeScale=3;
 
         loader.load("./model/idle_special1.glb", idleSpecialGLB=>{
           idleSpecialAction=mixer.clipAction(idleSpecialGLB.animations[0]);
@@ -510,7 +512,7 @@ function createOtherPlayerModel(playerId, playerData, data) {
 
       playerLoader.load("./model/run.glb", runGLB => {
         const runAction = playerMixer.clipAction(runGLB.animations[0]);
-        runAction.timeScale = 3.3;
+        runAction.timeScale = 3;
         playerData.runAction = runAction;
 
         playerLoader.load("./model/idle_special1.glb", idleSpecialGLB => {
@@ -962,7 +964,7 @@ function setAnim(target){
 
   if(target==="run" && runAction){
     outgoing.fadeOut(0.2);
-    runAction.reset().fadeIn(0.05).play();
+    runAction.reset().fadeIn(0.2).play();
     currentAnim="run";
     idleTimer=0;
   }
@@ -1069,14 +1071,16 @@ function animate(){
     let forward=(keys.KeyW?1:0)+(keys.KeyS?-1:0);
     let sideways=(keys.KeyD?1:0)+(keys.KeyA?-1:0);
 
-    // Combine PC sprint, mobile sprint, gamepad sprint
+    // Combine PC sprint, mobile sprint, gamepad sprint (can't sprint if stamina is 0 or sprint is blocked)
     isSprinting =
       (
         keys.ShiftLeft ||
         keys.ShiftRight ||
         sprintTouch.active
       ) &&
-      (Math.abs(forward)>0 || Math.abs(sideways)>0);
+      (Math.abs(forward)>0 || Math.abs(sideways)>0) &&
+      playerStamina > 0 &&
+      sprintBlockTimer <= 0;
 
     // ---------- FIXED JOYSTICK SPRINT LOGIC ----------
     if (leftJoy.active) {
@@ -1137,9 +1141,19 @@ function animate(){
       playerState.pos.add(moveDir.multiplyScalar(speed*dt));
       model.position.copy(playerState.pos);
 
-      if(isSprinting) setAnim("run");
-      else setAnim("walk");
+      setAnim(isSprinting ? "run" : "walk");
       playerState.moving=true;
+
+      // Stamina depletion when sprinting
+      if(isSprinting && playerStamina > 0){
+        const prevStamina = playerStamina;
+        playerStamina = Math.max(0, playerStamina - 20 * dt);
+        // Start timers when stamina reaches 0
+        if (prevStamina > 0 && playerStamina === 0) {
+          staminaRecoveryTimer = 1.0; // 1 second delay before recovery starts
+          sprintBlockTimer = 1.0; // 1 second sprint block
+        }
+      }
     }
     else {
       idleTimer+=dt;
@@ -1153,6 +1167,19 @@ function animate(){
       }
       playerState.moving=false;
       isSprinting=false;
+    }
+
+    // Update timers (always)
+    if (staminaRecoveryTimer > 0) {
+      staminaRecoveryTimer -= dt;
+    }
+    if (sprintBlockTimer > 0) {
+      sprintBlockTimer -= dt;
+    }
+
+    // Stamina recovery when recovery timer is done (while walking or standing, but not sprinting)
+    if(playerStamina < maxStamina && staminaRecoveryTimer <= 0 && !isSprinting){
+      playerStamina = Math.min(maxStamina, playerStamina + 15 * dt);
     }
 
     const camX=playerState.pos.x-Math.sin(camYaw)*camDist;
@@ -1205,18 +1232,18 @@ function animate(){
   });
 
   // Emit dust if sprinting
-  if (isSprinting && moving) {
-    for (let i = 0; i < dustCount; i++) {
-      if (dustLifetimes[i] <= 0) {
-        dustPositions[i * 3] = playerState.pos.x + (Math.random() - 0.5) * 0.2;
-        dustPositions[i * 3 + 1] = playerState.pos.y;
-        dustPositions[i * 3 + 2] = playerState.pos.z + (Math.random() - 0.5) * 0.2;
-        dustVelocities[i].set((Math.random() - 0.5) * 2, Math.random() * 1 + 0.5, (Math.random() - 0.5) * 2);
-        dustLifetimes[i] = 2;
-        break;
-      }
-    }
-  }
+  // if (isSprinting && moving) {
+  //   for (let i = 0; i < dustCount; i++) {
+  //     if (dustLifetimes[i] <= 0) {
+  //       dustPositions[i * 3] = playerState.pos.x + (Math.random() - 0.5) * 0.2;
+  //       dustPositions[i * 3 + 1] = playerState.pos.y;
+  //       dustPositions[i * 3 + 2] = playerState.pos.z + (Math.random() - 0.5) * 0.2;
+  //       dustVelocities[i].set((Math.random() - 0.5) * 2, Math.random() * 1 + 0.5, (Math.random() - 0.5) * 2);
+  //       dustLifetimes[i] = 2;
+  //       break;
+  //     }
+  //   }
+  // }
 
   // Update dust particles
   for (let i = 0; i < dustCount; i++) {
