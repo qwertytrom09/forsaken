@@ -4,13 +4,12 @@ import * as THREE from "three";
 import { GLTFLoader } from "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
 
 const hud=document.getElementById('hud');
-const shiftLockIndicator=document.getElementById('shiftLockIndicator');
 const settingsOverlay=document.getElementById('settingsOverlay');
-const baseHudMessage='Right-click + drag to rotate camera | WASD to move | Hold Shift to sprint | Press Ctrl for Ctrl Lock';
+const baseHudMessage='Right-click + drag to rotate camera | WASD to move | Hold Shift to sprint';
 const hudState={gamepad:false};
-let shiftLockEnabled=false;
 let fpsCounter=0, fpsDisplay=0;
 let isSprinting=false;
+let chatVisible=true;
 
 // Health & Stamina
 let playerHealth = 100;
@@ -25,15 +24,370 @@ const settings = {
   mouseSensitivity: 1,
   gamepadDeadzone: 0.1,
   gamepadSensitivity: 1,
-  graphicsQuality: 'medium',
-  showFPS: false
+  graphicsQuality: 'medium'
+};
+
+// ---------- ACCESSORY SYSTEM ----------
+// Available accessories by category
+const accessoryConfig = {
+  hat: {
+    none: null,
+    hat_basic: {
+      file: 'HAT_GLB.glb',
+      defaultPosition: [0, 1.8, 0],
+      defaultRotation: [0, 0, 0],
+      defaultScale: [0.3, 0.3, 0.3],
+      defaultAttachment: 'head'
+    }
+  },
+  face: {
+    none: null
+  },
+  back: {
+    none: null
+  }
+};
+
+// Custom accessory positions (saved by user)
+let customAccessoryPositions = {};
+
+// Store loaded accessory models
+const loadedAccessoryModels = new Map();
+
+// ---------- ACCESSORY FUNCTIONS ----------
+// Load accessory model
+function loadAccessoryModel(accessoryKey, callback) {
+  if (!accessoryKey || accessoryKey === 'none') {
+    callback(null);
+    return;
+  }
+
+  // Check if already loaded
+  if (loadedAccessoryModels.has(accessoryKey)) {
+    callback(loadedAccessoryModels.get(accessoryKey));
+    return;
+  }
+
+  // Find accessory config
+  let config = null;
+  for (const category in accessoryConfig) {
+    if (accessoryConfig[category][accessoryKey]) {
+      config = accessoryConfig[category][accessoryKey];
+      break;
+    }
+  }
+
+  if (!config) {
+    console.error('Accessory config not found:', accessoryKey);
+    callback(null);
+    return;
+  }
+
+  const loader = new GLTFLoader();
+  loader.load(`./model/accesories/${config.file}`, (gltf) => {
+    const model = gltf.scene;
+
+    // Store original model for reuse (without transforms)
+    loadedAccessoryModels.set(accessoryKey, model.clone());
+    callback(model);
+  }, undefined, (error) => {
+    console.error('Failed to load accessory:', accessoryKey, error);
+    callback(null);
+  });
+}
+
+// Apply accessories to player model
+function applyAccessoriesToPlayer(playerModel, accessories) {
+  // Remove ALL existing accessories from anywhere in the model hierarchy
+  const accessoriesToRemove = [];
+  playerModel.traverse((child) => {
+    if (child.userData && child.userData.isAccessory) {
+      accessoriesToRemove.push(child);
+    }
+  });
+
+  // Remove accessories from their current parents
+  accessoriesToRemove.forEach(acc => {
+    if (acc.parent) {
+      acc.parent.remove(acc);
+    }
+  });
+
+  // Load and add new accessories
+  const categories = ['hat', 'face', 'back'];
+  categories.forEach(category => {
+    const accessoryKey = accessories[category];
+    if (accessoryKey && accessoryKey !== 'none') {
+      loadAccessoryModel(accessoryKey, (accessoryModel) => {
+        if (accessoryModel) {
+          const accessoryClone = accessoryModel.clone();
+          accessoryClone.userData = { isAccessory: true, category: category, key: accessoryKey };
+
+          // Get custom position or use default
+          const customPos = customAccessoryPositions[accessoryKey];
+          let position, rotation, scale, attachmentPoint;
+
+          if (customPos) {
+            position = customPos.position;
+            rotation = customPos.rotation;
+            scale = customPos.scale;
+            attachmentPoint = customPos.attachment;
+          } else {
+            const config = accessoryConfig[category][accessoryKey];
+            position = config.defaultPosition;
+            rotation = config.defaultRotation;
+            scale = config.defaultScale[0];
+            attachmentPoint = config.defaultAttachment;
+          }
+
+          // Apply custom transform
+          accessoryClone.position.set(...position);
+          accessoryClone.rotation.set(...rotation.map(r => r * Math.PI / 180)); // Convert degrees to radians
+          accessoryClone.scale.set(scale, scale, scale);
+
+          // Find attachment point
+          let attachPoint = playerModel;
+          if (attachmentPoint && boneMappings[attachmentPoint]) {
+            const boneNames = boneMappings[attachmentPoint];
+            playerModel.traverse((child) => {
+              if (child.isBone && boneNames.includes(child.name)) {
+                attachPoint = child;
+                return; // Stop after finding first matching bone
+              }
+            });
+          }
+
+          attachPoint.add(accessoryClone);
+        }
+      });
+    }
+  });
+}
+
+// ---------- ACCESSORY POSITION EDITOR ----------
+let currentEditingAccessory = null;
+
+// Bone name mappings for different body parts
+const boneMappings = {
+  head: ['Head', 'head', 'mixamorigHead', 'Bone.Head'],
+  torso: ['Spine2', 'spine2', 'mixamorigSpine2', 'Bone.Spine2', 'Torso'],
+  leftArm: ['LeftArm', 'leftArm', 'mixamorigLeftArm', 'Bone.LeftArm', 'Left_Arm'],
+  rightArm: ['RightArm', 'rightArm', 'mixamorigRightArm', 'Bone.RightArm', 'Right_Arm'],
+  leftLeg: ['LeftUpLeg', 'leftLeg', 'mixamorigLeftUpLeg', 'Bone.LeftLeg'],
+  rightLeg: ['RightUpLeg', 'rightLeg', 'mixamorigRightUpLeg', 'Bone.RightLeg']
+};
+
+// Show/hide accessory editor based on selection
+function updateAccessoryEditor() {
+  const editor = document.getElementById('accessoryEditor');
+  const hasAccessory = Object.values(customization.accessories).some(acc => acc !== 'none');
+
+  if (hasAccessory) {
+    editor.style.display = 'block';
+    // Auto-select first available accessory for editing
+    const availableAccessories = Object.entries(customization.accessories)
+      .filter(([key, value]) => value !== 'none');
+    if (availableAccessories.length > 0) {
+      currentEditingAccessory = availableAccessories[0][1]; // accessory key
+      loadAccessoryPosition(currentEditingAccessory);
+    }
+  } else {
+    editor.style.display = 'none';
+    currentEditingAccessory = null;
+  }
+}
+
+// Load accessory position into editor
+function loadAccessoryPosition(accessoryKey) {
+  // Find the config for this accessory
+  let config = null;
+  let category = null;
+  for (const cat in accessoryConfig) {
+    if (accessoryConfig[cat][accessoryKey]) {
+      config = accessoryConfig[cat][accessoryKey];
+      category = cat;
+      break;
+    }
+  }
+
+  if (!config) {
+    console.error('Accessory config not found for:', accessoryKey);
+    return;
+  }
+
+  const customPos = customAccessoryPositions[accessoryKey];
+
+  if (customPos) {
+    document.getElementById('attachmentPoint').value = customPos.attachment || config.defaultAttachment;
+    document.getElementById('posX').value = customPos.position[0];
+    document.getElementById('posY').value = customPos.position[1];
+    document.getElementById('posZ').value = customPos.position[2];
+    document.getElementById('rotX').value = customPos.rotation[0];
+    document.getElementById('rotY').value = customPos.rotation[1];
+    document.getElementById('rotZ').value = customPos.rotation[2];
+    document.getElementById('accScale').value = customPos.scale;
+  } else {
+    document.getElementById('attachmentPoint').value = config.defaultAttachment;
+    document.getElementById('posX').value = config.defaultPosition[0];
+    document.getElementById('posY').value = config.defaultPosition[1];
+    document.getElementById('posZ').value = config.defaultPosition[2];
+    document.getElementById('rotX').value = config.defaultRotation[0];
+    document.getElementById('rotY').value = config.defaultRotation[1];
+    document.getElementById('rotZ').value = config.defaultRotation[2];
+    document.getElementById('accScale').value = config.defaultScale[0];
+  }
+
+  // Sync number inputs with slider values
+  syncInputsToSliders();
+  updateAccessoryValueDisplays();
+}
+
+// Sync number inputs to match slider values
+function syncInputsToSliders() {
+  document.getElementById('posXNum').value = document.getElementById('posX').value;
+  document.getElementById('posYNum').value = document.getElementById('posY').value;
+  document.getElementById('posZNum').value = document.getElementById('posZ').value;
+  document.getElementById('rotXNum').value = document.getElementById('rotX').value;
+  document.getElementById('rotYNum').value = document.getElementById('rotY').value;
+  document.getElementById('rotZNum').value = document.getElementById('rotZ').value;
+  document.getElementById('accScaleNum').value = document.getElementById('accScale').value;
+}
+
+// Sync sliders to match number input values
+function syncSlidersToInputs() {
+  document.getElementById('posX').value = document.getElementById('posXNum').value;
+  document.getElementById('posY').value = document.getElementById('posYNum').value;
+  document.getElementById('posZ').value = document.getElementById('posZNum').value;
+  document.getElementById('rotX').value = document.getElementById('rotXNum').value;
+  document.getElementById('rotY').value = document.getElementById('rotYNum').value;
+  document.getElementById('rotZ').value = document.getElementById('rotZNum').value;
+  document.getElementById('accScale').value = document.getElementById('accScaleNum').value;
+}
+
+// Save current accessory position
+function saveAccessoryPosition() {
+  if (!currentEditingAccessory) return;
+
+  customAccessoryPositions[currentEditingAccessory] = {
+    attachment: document.getElementById('attachmentPoint').value,
+    position: [
+      parseFloat(document.getElementById('posX').value),
+      parseFloat(document.getElementById('posY').value),
+      parseFloat(document.getElementById('posZ').value)
+    ],
+    rotation: [
+      parseFloat(document.getElementById('rotX').value),
+      parseFloat(document.getElementById('rotY').value),
+      parseFloat(document.getElementById('rotZ').value)
+    ],
+    scale: parseFloat(document.getElementById('accScale').value)
+  };
+
+  // Reapply accessories with new position
+  if (model) {
+    applyAccessoriesToPlayer(model, customization.accessories);
+  }
+
+  // Save to localStorage
+  localStorage.setItem('customAccessoryPositions', JSON.stringify(customAccessoryPositions));
+}
+
+// Reset accessory position to default
+function resetAccessoryPosition() {
+  if (!currentEditingAccessory) return;
+
+  delete customAccessoryPositions[currentEditingAccessory];
+  loadAccessoryPosition(currentEditingAccessory);
+
+  // Reapply accessories with default position
+  if (model) {
+    applyAccessoriesToPlayer(model, customization.accessories);
+  }
+
+  // Save to localStorage
+  localStorage.setItem('customAccessoryPositions', JSON.stringify(customAccessoryPositions));
+}
+
+// Update accessory position in real-time
+function updateAccessoryPosition(accessoryKey, newTransform) {
+  if (!model) return;
+
+  // Find the accessory in the model
+  let foundAccessory = null;
+  model.traverse((child) => {
+    if (child.userData && child.userData.isAccessory && child.userData.key === accessoryKey) {
+      foundAccessory = child;
+      return;
+    }
+  });
+
+  if (foundAccessory) {
+    // Update transforms
+    foundAccessory.position.set(...newTransform.position);
+    foundAccessory.rotation.set(...newTransform.rotation.map(r => r * Math.PI / 180));
+    foundAccessory.scale.set(newTransform.scale, newTransform.scale, newTransform.scale);
+
+    // If attachment point changed, need to reattach
+    if (newTransform.attachment !== foundAccessory.userData.attachmentPoint) {
+      // Remove from current parent
+      if (foundAccessory.parent) {
+        foundAccessory.parent.remove(foundAccessory);
+      }
+
+      // Find new attachment point
+      let attachPoint = model;
+      if (newTransform.attachment && boneMappings[newTransform.attachment]) {
+        const boneNames = boneMappings[newTransform.attachment];
+        model.traverse((child) => {
+          if (child.isBone && boneNames.includes(child.name)) {
+            attachPoint = child;
+            return;
+          }
+        });
+      }
+
+      attachPoint.add(foundAccessory);
+      foundAccessory.userData.attachmentPoint = newTransform.attachment;
+    }
+  }
+}
+
+// Update value displays
+function updateAccessoryValueDisplays() {
+  document.getElementById('posXValue').textContent = document.getElementById('posX').value;
+  document.getElementById('posYValue').textContent = document.getElementById('posY').value;
+  document.getElementById('posZValue').textContent = document.getElementById('posZ').value;
+  document.getElementById('rotXValue').textContent = document.getElementById('rotX').value + '°';
+  document.getElementById('rotYValue').textContent = document.getElementById('rotY').value + '°';
+  document.getElementById('rotZValue').textContent = document.getElementById('rotZ').value + '°';
+  document.getElementById('accScaleValue').textContent = document.getElementById('accScale').value;
+}
+
+// Load custom positions from localStorage
+function loadCustomAccessoryPositions() {
+  const saved = localStorage.getItem('customAccessoryPositions');
+  if (saved) {
+    customAccessoryPositions = JSON.parse(saved);
+  }
+}
+
+// ---------- Customization ----------
+const customization = {
+  bodyColor: '#77c0ff',
+  accentColor: '#ffffff',
+  scale: 1.0,
+  accessories: {
+    hat: 'none',
+    face: 'none',
+    back: 'none'
+  }
 };
 
 function updateHud(){
-  if(settings.showFPS){
-    hud.textContent=`FPS: ${fpsDisplay} | Right-click + drag to rotate camera | WASD to move | Gamepad: ${hudState.gamepad?'✓':'✗'} | Ctrl Lock: ${shiftLockEnabled?'On':'Off'} | Sprint: ${isSprinting?'On':'Off'}`;
-  } else {
-    hud.textContent=`${baseHudMessage} | Ctrl Lock: ${shiftLockEnabled?'On':'Off'}`;
+  if(hud){
+    const fpsText = `FPS: ${fpsDisplay} | `;
+    const statusText = `Gamepad: ${hudState.gamepad?'✓':'✗'} | Sprint: ${isSprinting?'On':'Off'}`;
+    hud.textContent = fpsText + baseHudMessage + ' | ' + statusText;
   }
 }
 
@@ -47,12 +401,26 @@ function updateStatsUI(){
     const healthPercent = (playerHealth / maxHealth) * 100;
     healthFill.style.width = healthPercent + '%';
     healthLabel.textContent = `Health: ${Math.round(playerHealth)}/${maxHealth}`;
+
+    // Add/remove low health class
+    if (playerHealth < 30) {
+      healthFill.classList.add('low');
+    } else {
+      healthFill.classList.remove('low');
+    }
   }
 
   if (staminaFill && staminaLabel) {
     const staminaPercent = (playerStamina / maxStamina) * 100;
     staminaFill.style.width = staminaPercent + '%';
     staminaLabel.textContent = `Stamina: ${Math.round(playerStamina)}/${maxStamina}`;
+
+    // Add/remove low stamina class
+    if (playerStamina < 25) {
+      staminaFill.classList.add('low');
+    } else {
+      staminaFill.classList.remove('low');
+    }
   }
 }
 
@@ -61,23 +429,136 @@ function updateSettingsUI(){
   document.getElementById('gamepadDeadzone').value = settings.gamepadDeadzone;
   document.getElementById('gamepadSensitivity').value = settings.gamepadSensitivity;
   document.getElementById('graphicsQuality').value = settings.graphicsQuality;
-  document.getElementById('showFPS').checked = settings.showFPS;
 }
 
 document.getElementById('mouseSensitivity').addEventListener('change', e=>{ settings.mouseSensitivity=parseFloat(e.target.value); });
 document.getElementById('gamepadDeadzone').addEventListener('change', e=>{ settings.gamepadDeadzone=parseFloat(e.target.value); });
 document.getElementById('gamepadSensitivity').addEventListener('change', e=>{ settings.gamepadSensitivity=parseFloat(e.target.value); });
 document.getElementById('graphicsQuality').addEventListener('change', e=>{ settings.graphicsQuality=e.target.value; });
-document.getElementById('showFPS').addEventListener('change', e=>{ settings.showFPS=e.target.checked; updateHud(); });
+
+document.getElementById('customizeBtn').addEventListener('click', ()=>{
+  document.getElementById('customizeOverlay').classList.add('visible');
+  updateAccessoryEditor();
+});
+document.getElementById('customizeClose').addEventListener('click', ()=>document.getElementById('customizeOverlay').classList.remove('visible'));
+document.getElementById('customizeApply').addEventListener('click', applyCustomization);
+
+// Accessory position editor events
+document.getElementById('saveAccessoryPos').addEventListener('click', saveAccessoryPosition);
+document.getElementById('resetAccessoryPos').addEventListener('click', resetAccessoryPosition);
+
+// Update accessory in real-time when sliders change
+function updateAccessoryRealtime() {
+  if (!currentEditingAccessory || !model) return;
+
+  // Get current slider values
+  const position = [
+    parseFloat(document.getElementById('posX').value),
+    parseFloat(document.getElementById('posY').value),
+    parseFloat(document.getElementById('posZ').value)
+  ];
+  const rotation = [
+    parseFloat(document.getElementById('rotX').value),
+    parseFloat(document.getElementById('rotY').value),
+    parseFloat(document.getElementById('rotZ').value)
+  ];
+  const scale = parseFloat(document.getElementById('accScale').value);
+  const attachmentPoint = document.getElementById('attachmentPoint').value;
+
+  // Update the accessory in real-time
+  updateAccessoryPosition(currentEditingAccessory, {
+    position,
+    rotation,
+    scale,
+    attachment: attachmentPoint
+  });
+
+  // Update value displays
+  updateAccessoryValueDisplays();
+}
+
+// Event listeners for real-time updates
+['posX', 'posY', 'posZ', 'rotX', 'rotY', 'rotZ', 'accScale', 'attachmentPoint'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateAccessoryRealtime);
+});
+
+// Sync number inputs to sliders when typing
+['posXNum', 'posYNum', 'posZNum', 'rotXNum', 'rotYNum', 'rotZNum', 'accScaleNum'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    syncSlidersToInputs();
+    updateAccessoryRealtime();
+  });
+});
+
+document.getElementById('customizeOverlay').addEventListener('click', e=>{
+  if(e.target===document.getElementById('customizeOverlay')) document.getElementById('customizeOverlay').classList.remove('visible');
+});
 
 document.getElementById('settingsBtn').addEventListener('click', ()=>settingsOverlay.classList.add('visible'));
 document.getElementById('settingsClose').addEventListener('click', ()=>settingsOverlay.classList.remove('visible'));
+
+// Chat toggle functionality
+document.getElementById('chatToggleBtn').addEventListener('click', toggleChat);
 
 settingsOverlay.addEventListener('click', e=>{
   if(e.target===settingsOverlay) settingsOverlay.classList.remove('visible');
 });
 
+// Chat toggle function
+function toggleChat() {
+  const chatBox = document.getElementById('chatBox');
+  const chatToggleBtn = document.getElementById('chatToggleBtn');
+
+  chatVisible = !chatVisible;
+
+  if (chatVisible) {
+    chatBox.style.display = 'flex';
+    chatToggleBtn.classList.add('active');
+  } else {
+    chatBox.style.display = 'none';
+    chatToggleBtn.classList.remove('active');
+  }
+}
+
+function applyCustomization() {
+  customization.bodyColor = document.getElementById('bodyColor').value;
+  customization.accentColor = document.getElementById('accentColor').value;
+  customization.scale = parseFloat(document.getElementById('playerScale').value);
+
+  // Get accessory selections
+  customization.accessories.hat = document.getElementById('hatSelect').value;
+  customization.accessories.face = document.getElementById('faceSelect').value;
+  customization.accessories.back = document.getElementById('backSelect').value;
+
+  // Apply to own model
+  if (model) {
+    model.scale.set(customization.scale * 0.35, customization.scale * 0.35, customization.scale * 0.35);
+    model.traverse((child) => {
+      if (child.isMesh && child.material) {
+        child.material.color.set(customization.bodyColor);
+      }
+    });
+
+    // Apply accessories
+    applyAccessoriesToPlayer(model, customization.accessories);
+  }
+
+  // Update Firebase
+  if (multiplayerReady && myPlayerRef) {
+    const update = window.firebaseUpdate;
+    update(myPlayerRef, {
+      bodyColor: customization.bodyColor,
+      accentColor: customization.accentColor,
+      scale: customization.scale,
+      accessories: customization.accessories
+    }).catch(err => console.error("Customization update error:", err));
+  }
+
+  document.getElementById('customizeOverlay').classList.remove('visible');
+}
+
 updateSettingsUI();
+loadCustomAccessoryPositions(); // Load saved accessory positions
 updateHud();
 
 // ---------- Hide joystick on PC ----------
@@ -164,6 +645,24 @@ sparkleGeometry.setAttribute('position', new THREE.BufferAttribute(sparklePositi
 const sparkleMaterial = new THREE.PointsMaterial({ color: 0xffff00, size: 0.1, transparent: true, opacity: 0.9 });
 const sparkleParticles = new THREE.Points(sparkleGeometry, sparkleMaterial);
 scene.add(sparkleParticles);
+
+// Sweat particles (for low stamina)
+const sweatCount = 15;
+const sweatGeometry = new THREE.BufferGeometry();
+const sweatPositions = new Float32Array(sweatCount * 3);
+const sweatVelocities = [];
+const sweatLifetimes = [];
+for (let i = 0; i < sweatCount; i++) {
+  sweatPositions[i * 3] = 0;
+  sweatPositions[i * 3 + 1] = 0;
+  sweatPositions[i * 3 + 2] = 0;
+  sweatVelocities.push(new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.2 - 0.5, (Math.random() - 0.5) * 0.5));
+  sweatLifetimes.push(0);
+}
+sweatGeometry.setAttribute('position', new THREE.BufferAttribute(sweatPositions, 3));
+const sweatMaterial = new THREE.PointsMaterial({ color: 0x88ddff, size: 0.03, transparent: true, opacity: 0.7 });
+const sweatParticles = new THREE.Points(sweatGeometry, sweatMaterial);
+scene.add(sweatParticles);
 
 
 
@@ -399,7 +898,11 @@ function initMultiplayer() {
     animation: currentAnim,
     timestamp: Date.now(),
     health: 100,
-    stamina: 100
+    stamina: 100,
+    bodyColor: customization.bodyColor,
+    accentColor: customization.accentColor,
+    scale: customization.scale,
+    accessories: customization.accessories
   }).then(() => {
     console.log("Player registered:", myPlayerId);
     multiplayerReady = true;
@@ -459,7 +962,12 @@ function updateOtherPlayer(playerId, data) {
       targetPos: new THREE.Vector3(data.x || 0, data.y || 0, data.z || 0),
       targetRot: data.rotation || 0,
       moving: data.moving || false,
-      health: data.health || 100
+      health: data.health || 100,
+      customization: {
+        bodyColor: data.bodyColor || '#77c0ff',
+        scale: data.scale || 1.0,
+        accessories: data.accessories || { hat: 'none', face: 'none', back: 'none' }
+      }
     };
 
     otherPlayers.set(playerId, playerData);
@@ -472,31 +980,46 @@ function updateOtherPlayer(playerId, data) {
       playerData.moving = data.moving || false;
       playerData.animation = data.animation || 'idle';
       playerData.health = data.health || 100;
+
+      // Update customization if changed
+      if (data.bodyColor) playerData.customization.bodyColor = data.bodyColor;
+      if (data.scale) playerData.customization.scale = data.scale;
+      if (data.accessories) {
+        playerData.customization.accessories = data.accessories;
+        // Reapply accessories if they changed
+        if (playerData.model) {
+          applyAccessoriesToPlayer(playerData.model, data.accessories);
+        }
+      }
     }
   }
 }
 
 function createOtherPlayerModel(playerId, playerData, data) {
   const playerLoader = new GLTFLoader();
-  const hue = (playerId.charCodeAt(0) * 137.508) % 360;
-  
+  const bodyColor = data.bodyColor || '#77c0ff';
+  const scale = data.scale || 1.0;
+
   playerLoader.load("./model/idle.glb", idleGLB => {
     const playerModel = idleGLB.scene;
-    playerModel.scale.set(0.35, 0.35, 0.35);
+    playerModel.scale.set(0.35 * scale, 0.35 * scale, 0.35 * scale);
     playerModel.rotation.y = playerData.targetRot;
     playerModel.position.set(playerData.targetPos.x, playerData.targetPos.y, playerData.targetPos.z);
-    
+
     playerModel.traverse((child) => {
       if (child.isMesh) {
         child.material = child.material.clone();
-        child.material.color.setHSL(hue / 360, 0.6, 0.5);
+        child.material.color.set(bodyColor);
       }
     });
-    
+
+    // Apply accessories
+    applyAccessoriesToPlayer(playerModel, data.accessories || { hat: 'none', face: 'none', back: 'none' });
+
     scene.add(playerModel);
     playerData.model = playerModel;
     playerData.mesh = playerModel;
-    
+
     const playerMixer = new THREE.AnimationMixer(playerModel);
     const idleAction = playerMixer.clipAction(idleGLB.animations[0]);
     idleAction.play();
@@ -606,16 +1129,16 @@ function createOtherPlayerModel(playerId, playerData, data) {
       playerData.emoteLaughAction = null;
     });
   }, undefined, err => {
-    const geometry = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
-    const material = new THREE.MeshStandardMaterial({ 
-      color: new THREE.Color().setHSL(hue / 360, 0.7, 0.6) 
+    const geometry = new THREE.CapsuleGeometry(0.4 * scale, 1 * scale, 4, 8);
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(bodyColor)
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(playerData.targetPos.x, playerData.targetPos.y, playerData.targetPos.z);
     scene.add(mesh);
     playerData.mesh = mesh;
     playerData.model = mesh;
-    
+
     createPlayerNameLabel(playerId, playerData);
   });
 }
@@ -789,7 +1312,7 @@ let camYaw=0, camPitch=-0.35, camDist=6, camHeight=3;
 
 // ---------- Input ----------
 const keys = {KeyW:false, KeyA:false, KeyS:false, KeyD:false, ShiftLeft:false, ShiftRight:false};
-window.addEventListener("keydown",e=>{ if(keys[e.code]!==undefined) keys[e.code]=true; if(e.code.includes("Control")&&!e.repeat) toggleShiftLock(); });
+window.addEventListener("keydown",e=>{ if(keys[e.code]!==undefined) keys[e.code]=true; });
 window.addEventListener("keyup",e=>{ if(keys[e.code]!==undefined) keys[e.code]=false; });
 
 // Mouse look
@@ -798,29 +1321,11 @@ document.addEventListener("contextmenu", e=>e.preventDefault());
 document.addEventListener("mousedown", e=>{ if(e.button===2) dragging=true; });
 document.addEventListener("mouseup", ()=>dragging=false);
 document.addEventListener("mousemove", e=>{
-  if(!dragging && !shiftLockEnabled) return;
+  if(!dragging) return;
   camYaw -= e.movementX*0.003*settings.mouseSensitivity;
   camPitch += e.movementY*0.003*settings.mouseSensitivity;
   camPitch=Math.max(-1.2, Math.min(0.4, camPitch));
 });
-
-// Pointer lock
-function setShiftLockState(state){
-  shiftLockEnabled=state;
-  shiftLockIndicator.textContent=state?'Ctrl Lock: On':'Ctrl Lock: Off';
-  shiftLockIndicator.classList.toggle('active', state);
-  updateHud();
-}
-function toggleShiftLock(){
-  if(!canvas.requestPointerLock) return;
-  if(document.pointerLockElement===canvas) document.exitPointerLock();
-  else canvas.requestPointerLock();
-}
-document.addEventListener("pointerlockchange", ()=>{
-  setShiftLockState(document.pointerLockElement===canvas);
-  if(!document.pointerLockElement) dragging=false;
-});
-document.addEventListener("pointerlockerror", ()=>setShiftLockState(false));
 
 // ---------- Gamepad ----------
 const gamepad={active:null};
@@ -857,6 +1362,8 @@ leftJoyEl.addEventListener("touchstart", e=>{
     if(!leftJoy.active && t.clientX<window.innerWidth/2){
       leftJoy.active=true;
       leftJoy.id=t.identifier;
+      leftJoyEl.classList.add('active');
+      leftStickEl.classList.add('active');
       const o=getTouchOffset(t);
       leftJoy.x=o.x; leftJoy.y=o.y;
       updateLeftStick(leftJoy.x,leftJoy.y);
@@ -880,6 +1387,8 @@ function endLeftTouch(e){
   for(const t of e.changedTouches){
     if(t.identifier===leftJoy.id){
       leftJoy.active=false; leftJoy.id=null; leftJoy.x=0; leftJoy.y=0;
+      leftJoyEl.classList.remove('active');
+      leftStickEl.classList.remove('active');
       resetLeftStick();
     }
   }
@@ -1232,18 +1741,33 @@ function animate(){
   });
 
   // Emit dust if sprinting
-  // if (isSprinting && moving) {
-  //   for (let i = 0; i < dustCount; i++) {
-  //     if (dustLifetimes[i] <= 0) {
-  //       dustPositions[i * 3] = playerState.pos.x + (Math.random() - 0.5) * 0.2;
-  //       dustPositions[i * 3 + 1] = playerState.pos.y;
-  //       dustPositions[i * 3 + 2] = playerState.pos.z + (Math.random() - 0.5) * 0.2;
-  //       dustVelocities[i].set((Math.random() - 0.5) * 2, Math.random() * 1 + 0.5, (Math.random() - 0.5) * 2);
-  //       dustLifetimes[i] = 2;
-  //       break;
-  //     }
-  //   }
-  // }
+  if (isSprinting && moving && Math.random() < 0.1) { // Only emit 10% of frames
+    for (let i = 0; i < dustCount; i++) {
+      if (dustLifetimes[i] <= 0) {
+        dustPositions[i * 3] = playerState.pos.x + (Math.random() - 0.5) * 0.2;
+        dustPositions[i * 3 + 1] = playerState.pos.y;
+        dustPositions[i * 3 + 1] = playerState.pos.y;
+        dustPositions[i * 3 + 2] = playerState.pos.z + (Math.random() - 0.5) * 0.2;
+        dustVelocities[i].set((Math.random() - 0.5) * 0.5, Math.random() * 0.5 + 0.3, (Math.random() - 0.5) * 0.5);
+        dustLifetimes[i] = 1.0;
+        break;
+      }
+    }
+  }
+
+  // Emit sweat particles when stamina is low
+  if (playerStamina < 25 && Math.random() < 0.05) { // 5% chance per frame when stamina < 25
+    for (let i = 0; i < sweatCount; i++) {
+      if (sweatLifetimes[i] <= 0) {
+        sweatPositions[i * 3] = playerState.pos.x + (Math.random() - 0.5) * 0.1;
+        sweatPositions[i * 3 + 1] = playerState.pos.y + 1.2 + (Math.random() - 0.5) * 0.2; // Around head area
+        sweatPositions[i * 3 + 2] = playerState.pos.z + (Math.random() - 0.5) * 0.1;
+        sweatVelocities[i].set((Math.random() - 0.5) * 0.5, Math.random() * 0.2 - 0.5, (Math.random() - 0.5) * 0.5);
+        sweatLifetimes[i] = 2.0;
+        break;
+      }
+    }
+  }
 
   // Update dust particles
   for (let i = 0; i < dustCount; i++) {
@@ -1276,6 +1800,22 @@ function animate(){
     }
   }
   sparkleGeometry.attributes.position.needsUpdate = true;
+
+  // Update sweat particles
+  for (let i = 0; i < sweatCount; i++) {
+    if (sweatLifetimes[i] > 0) {
+      sweatPositions[i * 3] += sweatVelocities[i].x * dt;
+      sweatPositions[i * 3 + 1] += sweatVelocities[i].y * dt;
+      sweatPositions[i * 3 + 2] += sweatVelocities[i].z * dt;
+      sweatVelocities[i].y -= 9.8 * dt;
+      sweatLifetimes[i] -= dt;
+    } else {
+      sweatPositions[i * 3] = 0;
+      sweatPositions[i * 3 + 1] = 0;
+      sweatPositions[i * 3 + 2] = 0;
+    }
+  }
+  sweatGeometry.attributes.position.needsUpdate = true;
 
   renderer.render(scene, camera);
   hudState.gamepad=!!gamepad.active;

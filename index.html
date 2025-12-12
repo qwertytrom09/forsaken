@@ -18,9 +18,9 @@
 <body>
 <canvas id="scene"></canvas>
 <div id="loading">Loading player…</div>
-<div id="hud">Right-click + drag to rotate camera | WASD to move</div>
+<button id="customizeBtn">🎨 Customize</button>
 <button id="settingsBtn">⚙ Settings</button>
-<div id="shiftLockIndicator">Ctrl Lock: Off</div>
+<button id="chatToggleBtn">💬 Chat</button>
 
 <!-- Health & Stamina Bars -->
 <div id="statsPanel">
@@ -68,21 +68,141 @@
   <button class="emote-btn" data-emote="point">☝️</button>
 </div>
 
+<!-- Customization menu -->
+<div id="customizeOverlay">
+  <div id="customizeMenu">
+    <h2>Avatar Customization</h2>
+    <div class="setting-row">
+      <label>Body Color</label>
+      <input type="color" id="bodyColor" value="#77c0ff">
+    </div>
+    <div class="setting-row">
+      <label>Accent Color</label>
+      <input type="color" id="accentColor" value="#ffffff">
+    </div>
+  <div class="setting-row">
+    <label>Scale</label>
+    <div class="slider-container">
+      <input type="range" id="playerScale" min="0.5" max="2" step="0.1" value="1">
+    </div>
+  </div>
+  <div class="setting-row">
+    <label>Hat</label>
+    <select id="hatSelect">
+      <option value="none">None</option>
+      <option value="hat_basic">Basic Hat</option>
+    </select>
+  </div>
+  <div class="setting-row">
+    <label>Face Accessory</label>
+    <select id="faceSelect">
+      <option value="none">None</option>
+    </select>
+  </div>
+  <div class="setting-row">
+    <label>Back Accessory</label>
+    <select id="backSelect">
+      <option value="none">None</option>
+    </select>
+  </div>
+
+  <!-- Accessory Position Editor -->
+  <div id="accessoryEditor" style="display: none;">
+    <h3>Accessory Position Editor</h3>
+    <div class="setting-row">
+      <label>Attachment Point</label>
+      <select id="attachmentPoint">
+        <option value="head">Head</option>
+        <option value="torso">Torso</option>
+        <option value="leftArm">Left Arm</option>
+        <option value="rightArm">Right Arm</option>
+        <option value="leftLeg">Left Leg</option>
+        <option value="rightLeg">Right Leg</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <label>Position X</label>
+      <div class="slider-container">
+        <input type="range" id="posX" min="-2" max="2" step="0.1" value="0">
+        <input type="number" id="posXNum" min="-2" max="2" step="0.1" value="0">
+      </div>
+    </div>
+    <div class="setting-row">
+      <label>Position Y</label>
+      <div class="slider-container">
+        <input type="range" id="posY" min="-2" max="2" step="0.1" value="0">
+        <input type="number" id="posYNum" min="-2" max="2" step="0.1" value="0">
+      </div>
+    </div>
+    <div class="setting-row">
+      <label>Position Z</label>
+      <div class="slider-container">
+        <input type="range" id="posZ" min="-2" max="2" step="0.1" value="0">
+        <input type="number" id="posZNum" min="-2" max="2" step="0.1" value="0">
+      </div>
+    </div>
+    <div class="setting-row">
+      <label>Rotation X</label>
+      <div class="slider-container">
+        <input type="range" id="rotX" min="-180" max="180" step="5" value="0">
+        <input type="number" id="rotXNum" min="-180" max="180" step="5" value="0">
+      </div>
+    </div>
+    <div class="setting-row">
+      <label>Rotation Y</label>
+      <div class="slider-container">
+        <input type="range" id="rotY" min="-180" max="180" step="5" value="0">
+        <input type="number" id="rotYNum" min="-180" max="180" step="5" value="0">
+      </div>
+    </div>
+    <div class="setting-row">
+      <label>Rotation Z</label>
+      <div class="slider-container">
+        <input type="range" id="rotZ" min="-180" max="180" step="5" value="0">
+        <input type="number" id="rotZNum" min="-180" max="180" step="5" value="0">
+      </div>
+    </div>
+    <div class="setting-row">
+      <label>Scale</label>
+      <div class="slider-container">
+        <input type="range" id="accScale" min="0.1" max="3" step="0.1" value="1">
+        <input type="number" id="accScaleNum" min="0.1" max="3" step="0.1" value="1">
+      </div>
+    </div>
+    <div class="button-group">
+      <button id="saveAccessoryPos">Save Position</button>
+      <button id="resetAccessoryPos">Reset</button>
+    </div>
+  </div>
+
+  <div class="button-group">
+      <button id="customizeApply">Apply</button>
+      <button id="customizeClose">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Settings menu -->
 <div id="settingsOverlay">
   <div id="settingsMenu">
     <h2>Settings</h2>
     <div class="setting-row">
       <label>Mouse Sensitivity</label>
-      <input type="range" id="mouseSensitivity" min="0.5" max="3" step="0.1" value="1">
+      <div class="slider-container">
+        <input type="range" id="mouseSensitivity" min="0.5" max="3" step="0.1" value="1">
+      </div>
     </div>
     <div class="setting-row">
       <label>Gamepad Deadzone</label>
-      <input type="range" id="gamepadDeadzone" min="0" max="0.5" step="0.05" value="0.1">
+      <div class="slider-container">
+        <input type="range" id="gamepadDeadzone" min="0" max="0.5" step="0.05" value="0.1">
+      </div>
     </div>
     <div class="setting-row">
       <label>Gamepad Sensitivity</label>
-      <input type="range" id="gamepadSensitivity" min="0.5" max="3" step="0.1" value="1">
+      <div class="slider-container">
+        <input type="range" id="gamepadSensitivity" min="0.5" max="3" step="0.1" value="1">
+      </div>
     </div>
     <div class="setting-row">
       <label>Graphics Quality</label>
@@ -92,10 +212,7 @@
         <option value="high">High</option>
       </select>
     </div>
-    <div class="setting-row">
-      <label>Show FPS</label>
-      <input type="checkbox" id="showFPS">
-    </div>
+
     <div class="button-group">
       <button id="settingsClose">Close</button>
     </div>
