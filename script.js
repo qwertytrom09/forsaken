@@ -5,7 +5,7 @@ import { GLTFLoader } from "https://unpkg.com/three@0.160.0/examples/jsm/loaders
 
 const hud=document.getElementById('hud');
 const settingsOverlay=document.getElementById('settingsOverlay');
-const baseHudMessage='Right-click + drag to rotate camera | WASD to move | Hold Shift to sprint';
+const baseHudMessage='Right-click + drag to rotate camera | Mouse wheel to zoom | WASD to move | Hold Shift to sprint';
 const hudState={gamepad:false};
 let fpsCounter=0, fpsDisplay=0;
 let isSprinting=false;
@@ -145,16 +145,22 @@ function applyAccessoriesToPlayer(playerModel, accessories) {
           accessoryClone.rotation.set(...rotation.map(r => r * Math.PI / 180)); // Convert degrees to radians
           accessoryClone.scale.set(scale, scale, scale);
 
-          // Find attachment point
+          // Find attachment point - use cache to avoid repeated traversal
           let attachPoint = playerModel;
           if (attachmentPoint && boneMappings[attachmentPoint]) {
-            const boneNames = boneMappings[attachmentPoint];
-            playerModel.traverse((child) => {
-              if (child.isBone && boneNames.includes(child.name)) {
-                attachPoint = child;
-                return; // Stop after finding first matching bone
-              }
-            });
+            const cacheKey = `${playerModel.uuid}_${attachmentPoint}`;
+            if (boneCache.has(cacheKey)) {
+              attachPoint = boneCache.get(cacheKey);
+            } else {
+              const boneNames = boneMappings[attachmentPoint];
+              playerModel.traverse((child) => {
+                if (child.isBone && boneNames.includes(child.name)) {
+                  attachPoint = child;
+                  boneCache.set(cacheKey, child); // Cache the bone reference
+                  return; // Stop after finding first matching bone
+                }
+              });
+            }
           }
 
           attachPoint.add(accessoryClone);
@@ -176,6 +182,9 @@ const boneMappings = {
   leftLeg: ['LeftUpLeg', 'leftLeg', 'mixamorigLeftUpLeg', 'Bone.LeftLeg'],
   rightLeg: ['RightUpLeg', 'rightLeg', 'mixamorigRightUpLeg', 'Bone.RightLeg']
 };
+
+// Cache for bone references to avoid repeated traversal
+const boneCache = new Map();
 
 // Show/hide accessory editor based on selection
 function updateAccessoryEditor() {
@@ -308,48 +317,59 @@ function resetAccessoryPosition() {
   localStorage.setItem('customAccessoryPositions', JSON.stringify(customAccessoryPositions));
 }
 
-// Update accessory position in real-time
+// Debounce timer for real-time accessory updates
+let accessoryUpdateTimer = null;
+
+// Update accessory position in real-time (debounced)
 function updateAccessoryPosition(accessoryKey, newTransform) {
   if (!model) return;
 
-  // Find the accessory in the model
-  let foundAccessory = null;
-  model.traverse((child) => {
-    if (child.userData && child.userData.isAccessory && child.userData.key === accessoryKey) {
-      foundAccessory = child;
-      return;
-    }
-  });
-
-  if (foundAccessory) {
-    // Update transforms
-    foundAccessory.position.set(...newTransform.position);
-    foundAccessory.rotation.set(...newTransform.rotation.map(r => r * Math.PI / 180));
-    foundAccessory.scale.set(newTransform.scale, newTransform.scale, newTransform.scale);
-
-    // If attachment point changed, need to reattach
-    if (newTransform.attachment !== foundAccessory.userData.attachmentPoint) {
-      // Remove from current parent
-      if (foundAccessory.parent) {
-        foundAccessory.parent.remove(foundAccessory);
-      }
-
-      // Find new attachment point
-      let attachPoint = model;
-      if (newTransform.attachment && boneMappings[newTransform.attachment]) {
-        const boneNames = boneMappings[newTransform.attachment];
-        model.traverse((child) => {
-          if (child.isBone && boneNames.includes(child.name)) {
-            attachPoint = child;
-            return;
-          }
-        });
-      }
-
-      attachPoint.add(foundAccessory);
-      foundAccessory.userData.attachmentPoint = newTransform.attachment;
-    }
+  // Clear previous timer
+  if (accessoryUpdateTimer) {
+    clearTimeout(accessoryUpdateTimer);
   }
+
+  // Debounce updates to every 50ms to reduce lag
+  accessoryUpdateTimer = setTimeout(() => {
+    // Find the accessory in the model
+    let foundAccessory = null;
+    model.traverse((child) => {
+      if (child.userData && child.userData.isAccessory && child.userData.key === accessoryKey) {
+        foundAccessory = child;
+        return;
+      }
+    });
+
+    if (foundAccessory) {
+      // Update transforms
+      foundAccessory.position.set(...newTransform.position);
+      foundAccessory.rotation.set(...newTransform.rotation.map(r => r * Math.PI / 180));
+      foundAccessory.scale.set(newTransform.scale, newTransform.scale, newTransform.scale);
+
+      // If attachment point changed, need to reattach
+      if (newTransform.attachment !== foundAccessory.userData.attachmentPoint) {
+        // Remove from current parent
+        if (foundAccessory.parent) {
+          foundAccessory.parent.remove(foundAccessory);
+        }
+
+        // Find new attachment point
+        let attachPoint = model;
+        if (newTransform.attachment && boneMappings[newTransform.attachment]) {
+          const boneNames = boneMappings[newTransform.attachment];
+          model.traverse((child) => {
+            if (child.isBone && boneNames.includes(child.name)) {
+              attachPoint = child;
+              return;
+            }
+          });
+        }
+
+        attachPoint.add(foundAccessory);
+        foundAccessory.userData.attachmentPoint = newTransform.attachment;
+      }
+    }
+  }, 50); // 50ms debounce
 }
 
 // Update value displays
@@ -609,24 +629,12 @@ const wallMat = new THREE.MeshStandardMaterial({color:0x454a52});
 const wall1 = new THREE.Mesh(wallGeom, wallMat); wall1.position.set(30, 2, -30); scene.add(wall1);
 const wall2 = new THREE.Mesh(wallGeom, wallMat); wall2.position.set(-30, 2, 30); wall2.rotation.y=Math.PI/2; scene.add(wall2);
 
+
+
+
+
 // ---------- Particle Systems ----------
-// Dust particles
-const dustCount = 50;
-const dustGeometry = new THREE.BufferGeometry();
-const dustPositions = new Float32Array(dustCount * 3);
-const dustVelocities = [];
-const dustLifetimes = [];
-for (let i = 0; i < dustCount; i++) {
-  dustPositions[i * 3] = 0;
-  dustPositions[i * 3 + 1] = 0;
-  dustPositions[i * 3 + 2] = 0;
-  dustVelocities.push(new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 1 + 0.5, (Math.random() - 0.5) * 2));
-  dustLifetimes.push(0);
-}
-dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
-const dustMaterial = new THREE.PointsMaterial({ color: 0xcccccc, size: 0.05, transparent: true, opacity: 0.8 });
-const dustParticles = new THREE.Points(dustGeometry, dustMaterial);
-scene.add(dustParticles);
+// Dust particles removed
 
 // Sparkle particles
 const sparkleCount = 20;
@@ -1308,7 +1316,112 @@ document.querySelectorAll('.emote-btn').forEach(btn => {
 });
 
 // ---------- Camera ----------
-let camYaw=0, camPitch=-0.35, camDist=6, camHeight=3;
+class CameraController {
+  constructor() {
+    this.yaw = 0;
+    this.pitch = -0.35;
+    this.distance = 8;
+    this.height = 2;
+    this.sensitivity = 0.002;
+    this.minDistance = 1;
+    this.maxDistance = 15;
+    this.minPitch = -1.4;
+    this.maxPitch = 0.4;
+    this.targetPosition = new THREE.Vector3();
+    this.currentPosition = new THREE.Vector3();
+    this.smoothSpeed = 0.1;
+    this.raycaster = new THREE.Raycaster();
+    this.collisionObjects = [];
+  }
+
+  addCollisionObject(object) {
+    this.collisionObjects.push(object);
+  }
+
+  updateMouse(deltaX, deltaY) {
+    this.yaw -= deltaX * this.sensitivity;
+    this.pitch += deltaY * this.sensitivity;
+    this.pitch = Math.max(this.minPitch, Math.min(this.maxPitch, this.pitch));
+  }
+
+  zoom(delta) {
+    this.distance += delta * 0.5;
+    this.distance = Math.max(this.minDistance, Math.min(this.maxDistance, this.distance));
+  }
+
+  update(playerPosition) {
+    // Calculate desired camera position
+    const offsetX = Math.sin(this.yaw) * this.distance;
+    const offsetZ = Math.cos(this.yaw) * this.distance;
+    const offsetY = this.height + Math.sin(this.pitch) * this.distance;
+
+    const desiredPosition = new THREE.Vector3(
+      playerPosition.x - offsetX,
+      playerPosition.y + offsetY,
+      playerPosition.z - offsetZ
+    );
+
+    // Prevent camera from going below ground level
+    const minCameraY = playerPosition.y + 0.5; // Camera should be at least 0.5 units above player
+    if (desiredPosition.y < minCameraY) {
+      desiredPosition.y = minCameraY;
+    }
+
+    // Check for collisions with objects
+    const direction = new THREE.Vector3().subVectors(desiredPosition, playerPosition).normalize();
+    const distance = playerPosition.distanceTo(desiredPosition);
+
+    this.raycaster.set(playerPosition, direction);
+
+    let closestIntersection = null;
+    let minDistance = distance;
+
+    // Check intersections with all collision objects
+    for (const object of this.collisionObjects) {
+      const intersections = this.raycaster.intersectObject(object, true);
+      for (const intersection of intersections) {
+        if (intersection.distance < minDistance && intersection.distance > 0.5) { // Don't collide too close to player
+          minDistance = intersection.distance;
+          closestIntersection = intersection;
+        }
+      }
+    }
+
+    // If we found a collision, adjust camera position
+    if (closestIntersection) {
+      // Position camera just before the intersection point
+      this.targetPosition.copy(direction).multiplyScalar(minDistance - 0.2).add(playerPosition);
+    } else {
+      this.targetPosition.copy(desiredPosition);
+    }
+
+    // Ensure camera doesn't go below minimum height
+    if (this.targetPosition.y < minCameraY) {
+      this.targetPosition.y = minCameraY;
+    }
+
+    // Smooth camera movement
+    this.currentPosition.lerp(this.targetPosition, this.smoothSpeed);
+
+    // Update camera
+    camera.position.copy(this.currentPosition);
+    camera.lookAt(playerPosition.x, playerPosition.y + 2, playerPosition.z);
+  }
+}
+
+const cameraController = new CameraController();
+let lastMouseX = 0, lastMouseY = 0;
+
+// Add collision objects to camera controller
+cameraController.addCollisionObject(ground);
+cameraController.addCollisionObject(rock1);
+cameraController.addCollisionObject(rock2);
+cameraController.addCollisionObject(rock3);
+cameraController.addCollisionObject(pillar1);
+cameraController.addCollisionObject(pillar2);
+cameraController.addCollisionObject(platform);
+cameraController.addCollisionObject(wall1);
+cameraController.addCollisionObject(wall2);
 
 // ---------- Input ----------
 const keys = {KeyW:false, KeyA:false, KeyS:false, KeyD:false, ShiftLeft:false, ShiftRight:false};
@@ -1316,15 +1429,29 @@ window.addEventListener("keydown",e=>{ if(keys[e.code]!==undefined) keys[e.code]
 window.addEventListener("keyup",e=>{ if(keys[e.code]!==undefined) keys[e.code]=false; });
 
 // Mouse look
-let dragging=false;
-document.addEventListener("contextmenu", e=>e.preventDefault());
-document.addEventListener("mousedown", e=>{ if(e.button===2) dragging=true; });
-document.addEventListener("mouseup", ()=>dragging=false);
-document.addEventListener("mousemove", e=>{
-  if(!dragging) return;
-  camYaw -= e.movementX*0.003*settings.mouseSensitivity;
-  camPitch += e.movementY*0.003*settings.mouseSensitivity;
-  camPitch=Math.max(-1.2, Math.min(0.4, camPitch));
+let dragging = false;
+document.addEventListener("contextmenu", e => e.preventDefault());
+document.addEventListener("mousedown", e => {
+  if (e.button === 2) {
+    dragging = true;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+  }
+});
+document.addEventListener("mouseup", () => dragging = false);
+document.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  const deltaX = e.clientX - lastMouseX;
+  const deltaY = e.clientY - lastMouseY;
+  cameraController.updateMouse(deltaX, deltaY);
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+});
+
+// Mouse wheel zoom
+document.addEventListener("wheel", e => {
+  e.preventDefault();
+  cameraController.zoom(e.deltaY * 0.01);
 });
 
 // ---------- Gamepad ----------
@@ -1415,9 +1542,7 @@ document.addEventListener("touchmove", e=>{
     if(t.identifier===touchLook.id){
       const dx=t.clientX-touchLook.lastX;
       const dy=t.clientY-touchLook.lastY;
-      camYaw-=dx*0.003;
-      camPitch+=dy*0.003;
-      camPitch=Math.max(-1.2, Math.min(0.4, camPitch));
+      cameraController.updateMouse(dx, dy);
       touchLook.lastX=t.clientX;
       touchLook.lastY=t.clientY;
     }
@@ -1627,16 +1752,14 @@ function animate(){
       const rmag=Math.sqrt(rx*rx+ry*ry);
       if(rmag>dz){
         const n=(rmag-dz)/(1-dz);
-        camYaw-=rx*n*0.06*settings.gamepadSensitivity;
-        camPitch+=ry*n*0.06*settings.gamepadSensitivity;
-        camPitch=Math.max(-1.2,Math.min(0.4,camPitch));
+        cameraController.updateMouse(rx*n*0.06*settings.gamepadSensitivity, ry*n*0.06*settings.gamepadSensitivity);
       }
     }
 
     const moving=Math.abs(forward)>0 || Math.abs(sideways)>0;
     if(moving){
-      const camF=new THREE.Vector3(Math.sin(camYaw),0,Math.cos(camYaw));
-      const camR=new THREE.Vector3(-Math.cos(camYaw),0,Math.sin(camYaw));
+      const camF=new THREE.Vector3(Math.sin(cameraController.yaw),0,Math.cos(cameraController.yaw));
+      const camR=new THREE.Vector3(-Math.cos(cameraController.yaw),0,Math.sin(cameraController.yaw));
       let moveDir=new THREE.Vector3().addScaledVector(camF,forward).addScaledVector(camR,sideways);
       const mag=moveDir.length(); if(mag>1) moveDir.normalize();
 
@@ -1645,6 +1768,9 @@ function animate(){
       playerState.rot+=rotDiff*0.2;
       playerState.rot=normalizeAngle(playerState.rot);
       model.rotation.y=playerState.rot;
+
+      // Update camera with new controller
+      cameraController.update(playerState.pos);
 
       const speed=isSprinting?sprintSpeed:moveSpeed;
       playerState.pos.add(moveDir.multiplyScalar(speed*dt));
@@ -1656,7 +1782,7 @@ function animate(){
       // Stamina depletion when sprinting
       if(isSprinting && playerStamina > 0){
         const prevStamina = playerStamina;
-        playerStamina = Math.max(0, playerStamina - 20 * dt);
+        playerStamina = Math.max(0, playerStamina - 10 * dt);
         // Start timers when stamina reaches 0
         if (prevStamina > 0 && playerStamina === 0) {
           staminaRecoveryTimer = 1.0; // 1 second delay before recovery starts
@@ -1676,6 +1802,9 @@ function animate(){
       }
       playerState.moving=false;
       isSprinting=false;
+
+      // Update camera even when not moving
+      cameraController.update(playerState.pos);
     }
 
     // Update timers (always)
@@ -1690,12 +1819,6 @@ function animate(){
     if(playerStamina < maxStamina && staminaRecoveryTimer <= 0 && !isSprinting){
       playerStamina = Math.min(maxStamina, playerStamina + 15 * dt);
     }
-
-    const camX=playerState.pos.x-Math.sin(camYaw)*camDist;
-    const camZ=playerState.pos.z-Math.cos(camYaw)*camDist;
-    const camY=playerState.pos.y+camHeight+Math.sin(camPitch)*camDist;
-    camera.position.set(camX,camY,camZ);
-    camera.lookAt(playerState.pos.x,playerState.pos.y+2,playerState.pos.z);
   }
 
   // Update other players (smooth interpolation)
@@ -1738,22 +1861,21 @@ function animate(){
       playerData.nameLabel.position.copy(playerData.mesh.position);
       playerData.nameLabel.position.y += 2.5;
     }
+
+    // Distance-based accessory culling for performance
+    const distanceToPlayer = camera.position.distanceTo(playerData.targetPos);
+    const accessoryCullDistance = 50; // Hide accessories beyond this distance
+
+    if (playerData.model) {
+      playerData.model.traverse((child) => {
+        if (child.userData && child.userData.isAccessory) {
+          child.visible = distanceToPlayer <= accessoryCullDistance;
+        }
+      });
+    }
   });
 
-  // Emit dust if sprinting
-  if (isSprinting && moving && Math.random() < 0.1) { // Only emit 10% of frames
-    for (let i = 0; i < dustCount; i++) {
-      if (dustLifetimes[i] <= 0) {
-        dustPositions[i * 3] = playerState.pos.x + (Math.random() - 0.5) * 0.2;
-        dustPositions[i * 3 + 1] = playerState.pos.y;
-        dustPositions[i * 3 + 1] = playerState.pos.y;
-        dustPositions[i * 3 + 2] = playerState.pos.z + (Math.random() - 0.5) * 0.2;
-        dustVelocities[i].set((Math.random() - 0.5) * 0.5, Math.random() * 0.5 + 0.3, (Math.random() - 0.5) * 0.5);
-        dustLifetimes[i] = 1.0;
-        break;
-      }
-    }
-  }
+
 
   // Emit sweat particles when stamina is low
   if (playerStamina < 25 && Math.random() < 0.05) { // 5% chance per frame when stamina < 25
@@ -1769,21 +1891,7 @@ function animate(){
     }
   }
 
-  // Update dust particles
-  for (let i = 0; i < dustCount; i++) {
-    if (dustLifetimes[i] > 0) {
-      dustPositions[i * 3] += dustVelocities[i].x * dt;
-      dustPositions[i * 3 + 1] += dustVelocities[i].y * dt;
-      dustPositions[i * 3 + 2] += dustVelocities[i].z * dt;
-      dustVelocities[i].y -= 9.8 * dt;
-      dustLifetimes[i] -= dt;
-    } else {
-      dustPositions[i * 3] = 0;
-      dustPositions[i * 3 + 1] = 0;
-      dustPositions[i * 3 + 2] = 0;
-    }
-  }
-  dustGeometry.attributes.position.needsUpdate = true;
+
 
   // Update sparkle particles
   for (let i = 0; i < sparkleCount; i++) {
